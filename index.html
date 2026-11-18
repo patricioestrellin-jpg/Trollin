@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#090817" />
+  <meta name="description" content="CHINOINFIERNO Key Manager: consulta y reclama tus keys." />
+  <title>CHINOINFIERNO · Key Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="ambient ambient-1"></div><div class="ambient ambient-2"></div>
+  <div class="app-shell">
+    <header class="topbar">
+      <a href="#inicio" class="brand" aria-label="Inicio de CHINOINFIERNO">
+        <span class="brand-icon"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="m29 8 11 11-11 21H12L3 24 12 8h17Z" stroke="currentColor" stroke-width="2.8" stroke-linejoin="round"/><path d="m29 8-5 16 5 16M3 24h21l16-5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span><strong>CHINOINFIERNO</strong><small>KEY MANAGER <span class="brand-ver">/ V1</span></small></span>
+      </a>
+      <div class="top-actions">
+        <span class="sync-status" id="syncStatus"><span class="pulse-dot"></span><span id="syncLabel">Cargando…</span></span>
+        <button id="accountBtn" class="account-button" type="button"><span class="account-circle" id="accountInitial">↗</span><span id="accountLabel">Iniciar sesión</span></button>
+      </div>
+    </header>
+
+    <main id="inicio">
+      <section class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="eyebrow-line"></span> ACCESO EXCLUSIVO · KEY VAULT</div>
+          <h1>Tu próxima key.<br /><span>Sin complicaciones.</span></h1>
+          <p>Consulta las keys disponibles, reclama la tuya y llévala contigo. Todo en un solo lugar.</p>
+          <div class="hero-buttons"><button id="heroBrowse" class="primary-button" type="button">Explorar keys <span aria-hidden="true">↗</span></button><button id="heroMine" class="ghost-button" type="button">Mis keys <span aria-hidden="true">↗</span></button></div>
+        </div>
+        <div class="vault-art" aria-hidden="true"><div class="art-grid"></div><div class="orb orb-outer"><div class="orb orb-mid"><div class="orb orb-inner"><svg viewBox="0 0 92 92" fill="none"><circle cx="32" cy="35" r="14" stroke="currentColor" stroke-width="8"/><path d="m43 46 28 28m-2-2 7-7m-14 0 7-7" stroke="currentColor" stroke-width="8" stroke-linecap="round"/></svg></div></div></div><span class="art-tag art-tag-top">// SECURE ACCESS</span><span class="art-tag art-tag-bottom">VAULT_001 · ONLINE</span></div>
+      </section>
+
+      <section class="stats" aria-label="Resumen del inventario">
+        <div class="stat"><div class="stat-top"><span>KEYS TOTALES</span><span class="stat-glyph">◈</span></div><strong id="countTotal">—</strong><small>Inventario completo</small></div>
+        <div class="stat"><div class="stat-top"><span>DISPONIBLES</span><span class="mini-status green">● LIVE</span></div><strong id="countAvailable">—</strong><small>Listas para reclamar</small></div>
+        <div class="stat"><div class="stat-top"><span>FULL / USADAS</span><span class="mini-status pink">● FULL</span></div><strong id="countFull">—</strong><small>Ya fueron reclamadas</small></div>
+        <div class="stat"><div class="stat-top"><span>APARTADAS</span><span class="mini-status yellow">● HOLD</span></div><strong id="countReserved">—</strong><small>Reservadas temporalmente</small></div>
+      </section>
+
+      <section id="explorar" class="catalog-section">
+        <div class="section-heading"><div><div class="section-kicker">// INVENTORY</div><h2>Explorar keys<span class="heading-dot">.</span></h2><p>El estado se actualiza automáticamente.</p></div><button class="refresh-button" type="button" id="refreshBtn" title="Actualizar inventario"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.8 9A7 7 0 0 1 18.8 7L20 12M4 12l1.2 5A7 7 0 0 0 18.2 15" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Actualizar</span></button></div>
+        <div class="toolbar"><div class="tabs" role="group" aria-label="Filtrar keys"><button type="button" class="tab active" data-filter="all">Todas</button><button type="button" class="tab" data-filter="available">Disponibles</button><button type="button" class="tab" data-filter="full">Full</button><button type="button" class="tab" data-filter="reserved">Apartadas</button></div><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="10.8" cy="10.8" r="6.4"/><path d="m16 16 5 5"/></svg><input id="searchInput" type="search" placeholder="Buscar tipo de key…" aria-label="Buscar keys" /></label></div>
+        <div id="catalog" class="key-grid" aria-live="polite"></div>
+        <p class="footnote"><span class="footnote-icon">ⓘ</span> Cada key se entrega a una sola persona. El código completo aparece únicamente después de reclamarla.</p>
+      </section>
+
+      <section class="my-keys-section" id="myKeysSection" hidden><div class="section-heading"><div><div class="section-kicker">// MY ACCESS</div><h2>Mis keys<span class="heading-dot">.</span></h2><p>Tus códigos reclamados.</p></div></div><div id="myKeysGrid" class="key-grid"></div></section>
+      <section class="admin-section" id="adminSection" hidden><div class="section-heading"><div><div class="section-kicker">// OWNER CONSOLE</div><h2>Panel privado<span class="heading-dot">.</span></h2><p>Agrega keys, cambia estados y administra el inventario.</p></div><button id="addKeysBtn" type="button" class="primary-button small-button">+ Agregar keys</button></div><div class="admin-panel"><div class="admin-panel-header"><span>INVENTARIO / ADMIN</span><span id="adminCount">0 registros</span></div><div id="adminList" class="admin-list"></div></div><p class="footnote">Cambiar el estado aquí no activa, cancela ni revoca licencias en Luarmor u otro proveedor: solo organiza las entregas de esta web.</p></section>
+      <footer><div class="footer-brand">◈ <strong>CHINOINFIERNO</strong><span> / KEY MANAGER</span></div><span>PRIVATE KEY DISTRIBUTION · 2026</span></footer>
+    </main>
+  </div>
+
+  <div class="overlay" id="modalOverlay" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><button id="modalClose" type="button" class="modal-close" aria-label="Cerrar">×</button><div class="modal-accent"></div><div id="modalContent"></div></div></div>
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+  <script src="config.js"></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
