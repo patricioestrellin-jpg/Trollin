@@ -1,311 +1,238 @@
 (() => {
   'use strict';
+  const $ = (id) => document.getElementById(id);
+  const cfg = window.CHINO_CONFIG || {};
+  const delay = Math.max(10, Number(cfg.refreshSeconds) || 15) * 1000;
+  const statusNames = {available:'AVAILABLE',full:'FULL',reserved:'RESERVED'};
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const short = (s) => String(s||'').replace(/-/g,'').slice(0,8).toUpperCase();
+  const state = {client:null,user:null,role:null,inventory:[],owned:[],keys:[],approvals:[],filter:'all',busy:false,cycle:0,authMode:'login',toastTimer:null};
+  let currentlyShown='bootView';
 
-  const CONFIG = window.CHINO_CONFIG || {};
-  const DEMO = !CONFIG.supabaseUrl || !CONFIG.supabaseAnonKey || CONFIG.supabaseUrl.includes('PON_AQUI') || CONFIG.supabaseAnonKey.includes('PON_AQUI');
-  const REFRESH_MS = Math.max(5, Number(CONFIG.refreshSeconds) || 10) * 1000;
-  const DEMO_KEY = 'chino_v1_demo_inventory';
-  const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9" r="4"/><path d="m11 12 9 9m0-5-4 4m-3-3 4-4"/></svg>';
-  const $ = (q) => document.querySelector(q);
-  const $$ = (q) => Array.from(document.querySelectorAll(q));
-  const safe = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-  const shortId = (id) => String(id || '').replace(/-/g,'').slice(0,8).toUpperCase();
-  const names = { available:'AVAILABLE', full:'FULL', reserved:'RESERVED' };
-  const descriptions = {available:'Lista para reclamar',full:'Ya fue reclamada',reserved:'Apartada temporalmente'};
-  let client = null;
-  const state = { inventory:[], owned:[], adminKeys:[], user:null, isAdmin:DEMO, filter:'all', query:'', loading:false, hasLoaded:false };
-
-  function demoSeed(){
-    return [
-      ['PERMANENT KEY','available'],['WEEKLY KEY','available'],['PERMANENT KEY','full'],
-      ['MONTHLY KEY','available'],['DAILY KEY','full'],['WEEKLY KEY','reserved'],
-      ['MONTHLY KEY','available'],['PERMANENT KEY','full'],['DAILY KEY','available']
-    ].map(([plan,status],i)=>({id:`demo-0${i+1}`,plan,status,code:`DEMO-KEY-${String(i+1).padStart(4,'0')}-NO-VALIDA`,claimed_by:null,claimed_at:null,created_at:new Date(Date.now()-i*450000).toISOString()}));
+  function screen(id) {
+    for (const s of ['bootView','setupView','loginView','pendingView','errorView','vaultView']) $(s).hidden=(s!==id);
+    $('logoutBtn').hidden=!(id==='vaultView' || id==='pendingView');
+    currentlyShown=id;
   }
-  function demoLoad(){
-    try { const v = JSON.parse(localStorage.getItem(DEMO_KEY)); if (Array.isArray(v)) return v; }
-    catch (_) { /* fallback */ }
-    const initial=demoSeed();demoSave(initial);return initial;
+  function toast(message,bad=false){
+    const el=$('toast');clearTimeout(state.toastTimer);el.textContent=message;el.classList.toggle('bad',bad);el.hidden=false;
+    state.toastTimer=setTimeout(()=>{el.hidden=true;},4400);
   }
-  function demoSave(data){try {localStorage.setItem(DEMO_KEY,JSON.stringify(data));} catch (_) {}}
-  function showToast(message,type='normal'){
-    const item=document.createElement('div');item.className=`toast ${type}`;item.textContent=message;$('#toastContainer').appendChild(item);
-    setTimeout(()=>{item.style.opacity='0';item.style.transition='opacity .22s';setTimeout(()=>item.remove(),220);},4100);
+  function friendly(e){
+    const m=String(e?.message||e||'Error desconocido');
+    if (/Invalid login credentials/i.test(m)) return 'Correo o contraseña incorrectos.';
+    if (/Email not confirmed|email_not_confirmed/i.test(m)) return 'Debes confirmar tu correo primero. Revisa el mensaje de Supabase.';
+    if (/rate limit|email rate limit/i.test(m)) return 'Se alcanzó el límite de correos. Configura SMTP propio en Supabase.';
+    if (/Error sending confirmation email|Error sending magic link|email address not authorized|only send.*authorized/i.test(m)) return 'Supabase no puede enviar ese correo. Configura SMTP personalizado en Authentication → SMTP.';
+    if (/ACCESS_DENIED/i.test(m)) return 'Esta cuenta no está autorizada.';
+    if (/ALREADY_CLAIMED/i.test(m)) return 'Tu cuenta ya reclamó una key.';
+    if (/NOT_AVAILABLE/i.test(m)) return 'Esta key ya no está disponible.';
+    if (/duplicate key|unique constraint/i.test(m)) return 'Hay una key o un correo repetido.';
+    if (/does not exist|could not find the function|schema cache|permission denied/i.test(m)) return 'Falta ejecutar V2_ACTUALIZACION.sql o revisar los permisos en Supabase.';
+    return m;
   }
-  function setSync(label,isDemo=false){$('#syncLabel').textContent=label;$('.pulse-dot').classList.toggle('demo',isDemo);}
-  function showModal(html){$('#modalContent').innerHTML=html;$('#modalOverlay').hidden=false;document.body.style.overflow='hidden';setTimeout(()=>$('.modal input, .modal textarea, .modal button:not(.modal-close)')?.focus(),40);}
-  function closeModal(){$('#modalOverlay').hidden=true;document.body.style.overflow='';$('#modalContent').innerHTML='';}
-  function heading(kicker,title,description){return `<div class="modal-kicker">${kicker}</div><h2 id="modalTitle">${title}</h2><p class="modal-description">${description}</p>`;}
-  function scrollToSection(id){document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'});}
-  async function copyText(value){
-    try {
-      if(navigator.clipboard?.writeText) await navigator.clipboard.writeText(value);
-      else {const input=document.createElement('textarea');input.value=value;input.style.position='fixed';input.style.opacity='0';document.body.appendChild(input);input.select();if(!document.execCommand('copy'))throw new Error('Copy failed');input.remove();}
-      showToast('Key copiada al portapapeles ✓','success');
-    } catch {showToast('No se pudo copiar automáticamente. Selecciona y copia la key.','error');}
+  function fail(e){console.error('[CHINO V2]',e);$('errorText').textContent=friendly(e);screen('errorView');}
+  function setAuthMode(mode){
+    state.authMode=mode;
+    document.querySelectorAll('[data-auth-mode]').forEach(b=>b.classList.toggle('selected',b.dataset.authMode===mode));
+    $('passwordGroup').hidden=(mode==='magic');
+    $('password').required=(mode!=='magic');
+    $('password').autocomplete=mode==='register'?'new-password':'current-password';
+    $('authHeading').textContent=mode==='login'?'Bienvenido.':mode==='register'?'Crear cuenta.':'Enlace privado.';
+    $('authHelp').textContent=mode==='login'?'Accede con tu correo y contraseña.':mode==='register'?'Una cuenta no te da acceso automáticamente: el dueño debe autorizarte.':'Te enviamos un enlace para iniciar sesión en este navegador.';
+    $('authSubmit').innerHTML=mode==='login'?'Iniciar sesión <span>→</span>':mode==='register'?'Crear cuenta <span>→</span>':'Enviar enlace <span>→</span>';
+    $('authMessage').hidden=true;
   }
-  function readableError(error){
-    const msg=String(error?.message || error || 'Error inesperado');
-    if(msg.includes('ALREADY_CLAIMED'))return 'Ya reclamaste una key con esta cuenta. Solo se permite una por persona.';
-    if(msg.includes('NOT_AVAILABLE'))return 'Esta key ya no está disponible. Actualiza el inventario.';
-    if(msg.includes('LOGIN_REQUIRED')||msg.includes('JWT'))return 'Inicia sesión para reclamar una key.';
-    if(msg.includes('duplicate key'))return 'Una de esas keys ya existe. Revisa los códigos repetidos.';
-    if(msg.includes('permission denied')||msg.includes('row-level security'))return 'Sin permisos. Revisa si tu correo ya fue agregado como administrador.';
-    return msg;
-  }
-
-  function loadSupabaseSdk(){
-    if(window.supabase?.createClient)return Promise.resolve();
+  function formMessage(message,bad=false){const e=$('authMessage');e.textContent=message;e.classList.toggle('bad',bad);e.hidden=false;}
+  function sdk(){
     return new Promise((resolve,reject)=>{
-      const script=document.createElement('script');
-      script.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
-      script.onload=()=>window.supabase?.createClient?resolve():reject(new Error('SDK de Supabase inválido'));
-      script.onerror=()=>reject(new Error('No se pudo cargar Supabase; revisa tu conexión a Internet'));
-      document.head.appendChild(script);
+      if(window.supabase?.createClient) return resolve();
+      const s=document.createElement('script');
+      s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
+      s.onload=()=>window.supabase?.createClient?resolve():reject(new Error('Biblioteca Supabase no disponible'));
+      s.onerror=()=>reject(new Error('No se pudo cargar la librería Supabase. Comprueba tu conexión.'));
+      document.head.appendChild(s);
     });
   }
-
   async function init(){
-    $('#modalClose').addEventListener('click',closeModal);
-    $('#modalOverlay').addEventListener('click',(e)=>{if(e.target.id==='modalOverlay')closeModal();});
-    document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closeModal();});
-    $('#heroBrowse').addEventListener('click',()=>scrollToSection('explorar'));
-    $('#heroMine').addEventListener('click',openMine);
-    $('#accountBtn').addEventListener('click',openAccount);
-    $('#refreshBtn').addEventListener('click',()=>refresh(true));
-    $$('.tab').forEach((btn)=>btn.addEventListener('click',()=>{state.filter=btn.dataset.filter;$$('.tab').forEach(b=>b.classList.toggle('active',b===btn));renderInventory();}));
-    $('#searchInput').addEventListener('input',(e)=>{state.query=e.target.value.toLowerCase().trim();renderInventory();});
-    $('#catalog').addEventListener('click',(e)=>{const button=e.target.closest('[data-claim]');if(button)confirmClaim(button.dataset.claim);});
-    $('#myKeysGrid').addEventListener('click',(e)=>{const button=e.target.closest('[data-copy-id]');if(button){const key=state.owned.find(k=>k.id===button.dataset.copyId);if(key)copyText(key.code);}});
-    $('#adminList').addEventListener('change',(e)=>{if(e.target.matches('[data-change-status]'))updateStatus(e.target.dataset.changeStatus,e.target.value);});
-    $('#adminList').addEventListener('click',(e)=>{const button=e.target.closest('[data-delete]');if(button)deleteKey(button.dataset.delete);});
-    $('#addKeysBtn').addEventListener('click',showAddKeys);
-    $('#modalContent').addEventListener('click',handleModalClick);
-    $('#modalContent').addEventListener('submit',handleModalSubmit);
+    $('authForm').addEventListener('submit',signIn);
+    document.querySelectorAll('[data-auth-mode]').forEach(b=>b.addEventListener('click',()=>setAuthMode(b.dataset.authMode)));
+    $('logoutBtn').addEventListener('click',logout);
+    $('pendingLogout').addEventListener('click',logout);
+    $('checkApproval').addEventListener('click',gate);
+    $('retryBtn').addEventListener('click',gate);
+    $('refreshBtn').addEventListener('click',()=>gate(true));
+    $('filters').addEventListener('click',(e)=>{const b=e.target.closest('[data-filter]');if(!b)return;state.filter=b.dataset.filter;document.querySelectorAll('[data-filter]').forEach(x=>x.classList.toggle('active',x===b));renderInventory();});
+    $('inventory').addEventListener('click',(e)=>{const b=e.target.closest('[data-claim]');if(b)claim(b.dataset.claim);});
+    $('ownedKeys').addEventListener('click',(e)=>{const b=e.target.closest('[data-copy]');if(b){const v=state.owned.find(k=>k.id===b.dataset.copy);if(v)copy(v.code);}});
+    $('addKeysForm').addEventListener('submit',addKeys);
+    $('approveForm').addEventListener('submit',approve);
+    $('approvals').addEventListener('click',(e)=>{const b=e.target.closest('[data-revoke]');if(b)revoke(b.dataset.revoke);});
+    $('adminKeys').addEventListener('click',(e)=>{const b=e.target.closest('[data-delete]');if(b)deleteKey(b.dataset.delete);});
+    $('adminKeys').addEventListener('change',(e)=>{const b=e.target.closest('[data-status]');if(b)changeStatus(b.dataset.status,b.value);});
+    $('closeDialog').addEventListener('click',closeDialog);
+    $('dialog').addEventListener('click',(e)=>{if(e.target===$('dialog'))closeDialog();});
+    document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closeDialog();});
+    $('dialogBody').addEventListener('click',(e)=>{const b=e.target.closest('[data-dialog-copy]');if(b)copy(b.dataset.dialogCopy);});
 
-    if(DEMO){
-      const banner=document.createElement('div');banner.className='demo-banner';banner.innerHTML='<strong>⚡ MODO DEMO</strong> Esta vista tiene keys de ejemplo. Los cambios se guardan solo en este navegador, no se comparten entre amigos.';
-      $('.topbar').insertAdjacentElement('afterend',banner);
-      state.user={id:'demo-local',email:'demo@chino.local'};
-      setSync('DEMO LOCAL',true);
-      await refresh();
-    } else {
-      try { await loadSupabaseSdk(); }
-      catch(err) {setSync('SIN CONEXIÓN');showToast(readableError(err),'error');return;}
-      client=window.supabase.createClient(CONFIG.supabaseUrl,CONFIG.supabaseAnonKey, { auth:{detectSessionInUrl:true, persistSession:true, autoRefreshToken:true} });
-      const {data,error}=await client.auth.getSession();
-      if(error)showToast(readableError(error),'error');
-      state.user=data?.session?.user || null;
-      client.auth.onAuthStateChange((_event,session)=>{
-        const nextId=session?.user?.id||null;
-        if((state.user?.id||null)!==nextId){state.user=session?.user||null;state.isAdmin=false;setTimeout(()=>refresh(),0);}
-      });
-      await refresh();
-      setInterval(()=>{if(!document.hidden)refresh(false);},REFRESH_MS);
-      document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh(false);});
+    if(!cfg.supabaseUrl?.startsWith('https://') || !/^((sb_publishable_)|(eyJ))/.test(cfg.supabaseAnonKey||'')){
+      $('setupError').textContent='Falta una URL o una Publishable Key válida en config.js. La versión V2 nunca activa keys ficticias.';
+      screen('setupView');return;
     }
+    try{
+      await sdk();
+      state.client=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+      state.client.auth.onAuthStateChange((_event,session)=>{
+        if((state.user?.id||null)!==(session?.user?.id||null))setTimeout(()=>gate(),0);
+      });
+      await gate();
+      setInterval(()=>{if(!document.hidden && state.client && state.user)gate(true);},delay);
+      document.addEventListener('visibilitychange',()=>{if(!document.hidden && state.user)gate(true);});
+    }catch(e){fail(e);}
   }
-
-  async function refresh(loud=false){
-    if(state.loading)return;
-    state.loading=true;
-    $('#refreshBtn').disabled=true;
-    try {
-      if(DEMO){
-        const data=demoLoad();state.inventory=data.map(({id,plan,status,created_at})=>({id,plan,status,created_at}));
-        state.owned=data.filter(k=>k.claimed_by==='demo-local');state.adminKeys=data;
-        state.isAdmin=true;
-      } else {
-        const {data,error}=await client.rpc('chino_inventory');
+  async function signIn(e){
+    e.preventDefault();
+    const email=$('email').value.trim().toLowerCase(),password=$('password').value,mode=state.authMode;
+    const b=$('authSubmit');b.disabled=true;
+    try{
+      let error, data;
+      if(mode==='magic'){
+        ({error}=await state.client.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname,shouldCreateUser:true}}));
         if(error)throw error;
-        state.inventory=data||[];
-        if(state.user){
-          const [{data:adminFlag,error:flagError},{data:owned,error:ownedError}]=await Promise.all([
-            client.rpc('chino_is_admin'),
-            client.from('chino_keys').select('id,plan,code,status,claimed_by,claimed_at,created_at').eq('claimed_by',state.user.id).order('created_at',{ascending:false})
-          ]);
-          if(flagError)throw flagError;
-          if(ownedError)throw ownedError;
-          state.isAdmin=!!adminFlag;
-          state.owned=owned||[];
-          if(state.isAdmin){
-            const {data:all,error:adminError}=await client.from('chino_keys').select('id,plan,code,status,claimed_by,created_at').order('created_at',{ascending:false});
-            if(adminError)throw adminError;
-            state.adminKeys=all||[];
-          } else state.adminKeys=[];
-        } else {state.isAdmin=false;state.owned=[];state.adminKeys=[];}
-        setSync('SYNC / '+(REFRESH_MS/1000)+'S');
+        formMessage('Revisa tu correo y Spam. Abre el enlace recibido para volver al vault. Si no llega, debes configurar SMTP en Supabase.');
+      }else if(mode==='register'){
+        ({data,error}=await state.client.auth.signUp({email,password,options:{emailRedirectTo:location.origin+location.pathname}}));
+        if(error)throw error;
+        formMessage(data?.session?'Cuenta creada. Esperando autorización del dueño.':'Cuenta registrada. Confirma el mensaje que recibas por correo; después deberás esperar autorización del dueño.');
+        if(data?.session)await gate();
+      }else{
+        ({error}=await state.client.auth.signInWithPassword({email,password}));
+        if(error)throw error;
+        await gate();
       }
-      state.hasLoaded=true;
-      renderAll();
-      if(loud)showToast('Inventario actualizado ✓','success');
-    } catch(e){
-      console.error('[CHINO] Error al sincronizar:',e);
-      setSync('ERROR DE CONEXIÓN');
-      if(!state.hasLoaded)$('#catalog').innerHTML='<div class="empty"><div class="empty-symbol">!</div><h3>No se pudo cargar</h3><p>Revisa la configuración y ejecuta database.sql en Supabase.</p></div>';
-      if(loud||!state.hasLoaded)showToast('Error de sincronización: '+readableError(e),'error');
-    } finally {state.loading=false;$('#refreshBtn').disabled=false;}
+    }catch(ex){formMessage(friendly(ex),true);}finally{b.disabled=false;}
   }
-
-  function renderAll(){
-    const keys=state.inventory;
-    $('#countTotal').textContent=keys.length;
-    $('#countAvailable').textContent=keys.filter(k=>k.status==='available').length;
-    $('#countFull').textContent=keys.filter(k=>k.status==='full').length;
-    $('#countReserved').textContent=keys.filter(k=>k.status==='reserved').length;
-    $('#accountLabel').textContent=DEMO?'Modo demo':(state.user?.email || 'Iniciar sesión');
-    $('#accountInitial').textContent=state.user?.email?.[0]?.toUpperCase() || '↗';
-    $('#myKeysSection').hidden=!state.user;
-    $('#adminSection').hidden=!state.isAdmin;
-    renderInventory();renderOwned();renderAdmin();
+  async function gate(quiet=false){
+    if(!state.client)return;
+    if(state.busy)return;
+    const cycle=++state.cycle;state.busy=true;
+    if(!quiet)screen('bootView');
+    try{
+      // getUser valida la cuenta contra Supabase, no solo un objeto almacenado localmente.
+      const {data:auth,error:authError}=await state.client.auth.getUser();
+      if(authError && !/Auth session missing/i.test(authError.message))throw authError;
+      if(cycle!==state.cycle)return;
+      state.user=auth?.user||null;
+      if(!state.user){state.role=null;state.inventory=[];state.owned=[];state.keys=[];state.approvals=[];screen('loginView');return;}
+      const {data:role,error:roleError}=await state.client.rpc('chino_access_status');
+      if(roleError)throw roleError;
+      if(cycle!==state.cycle)return;
+      state.role=role;
+      if(role!=='admin'&&role!=='approved'){
+        state.inventory=[];state.owned=[];state.keys=[];state.approvals=[];
+        $('pendingEmail').textContent=state.user.email||'Cuenta sin correo';screen('pendingView');return;
+      }
+      const requests=[state.client.rpc('chino_inventory'),state.client.from('chino_keys').select('id,plan,code,status,created_at').eq('claimed_by',state.user.id).order('created_at',{ascending:false})];
+      if(role==='admin'){
+        requests.push(state.client.from('chino_keys').select('id,plan,code,status,claimed_by,created_at').order('created_at',{ascending:false}));
+        requests.push(state.client.from('chino_allowed_emails').select('email,created_at').order('created_at',{ascending:false}));
+      }
+      const result=await Promise.all(requests);
+      const problem=result.find(r=>r.error)?.error;if(problem)throw problem;
+      if(cycle!==state.cycle)return;
+      state.inventory=result[0].data||[];state.owned=result[1].data||[];
+      state.keys=role==='admin'?(result[2].data||[]):[];
+      state.approvals=role==='admin'?(result[3].data||[]):[];
+      render();screen('vaultView');
+      if(!quiet)window.scrollTo({top:0,behavior:'instant'});
+    }catch(e){fail(e);}finally{state.busy=false;}
+  }
+  function render(){
+    $('welcomeEmail').textContent=state.user?.email||'';
+    $('rolePill').textContent=state.role==='admin'?'✦ OWNER':'● MIEMBRO';
+    $('adminArea').hidden=(state.role!=='admin');
+    const all=state.inventory;
+    $('totalCount').textContent=all.length;
+    $('availableCount').textContent=all.filter(k=>k.status==='available').length;
+    $('fullCount').textContent=all.filter(k=>k.status==='full').length;
+    $('reservedCount').textContent=all.filter(k=>k.status==='reserved').length;
+    renderInventory();renderOwned();if(state.role==='admin')renderAdmin();
   }
   function renderInventory(){
-    const items=state.inventory.filter(k=>(state.filter==='all'||k.status===state.filter)&&String(k.plan).toLowerCase().includes(state.query));
-    $('#catalog').innerHTML=items.length?items.map((k)=>`
-      <article class="key-card">
-        <div class="card-top"><span class="code-mark">${ICON}</span><span class="status-badge ${safe(k.status)}">● ${names[k.status]||'UNKNOWN'}</span></div>
-        <h3 class="card-plan">${safe(k.plan)}</h3><div class="card-id">KEY ID / ${safe(shortId(k.id))}</div>
-        <div class="card-bottom"><span class="card-caption ${safe(k.status)}">${descriptions[k.status]||'Estado desconocido'}</span>
-        <button class="card-action" data-claim="${safe(k.id)}" ${k.status!=='available'?'disabled':''}>${k.status==='available'?'Reclamar ↗':'No disponible'}</button></div>
-      </article>`).join(''):
-      '<div class="empty"><div class="empty-symbol">◇</div><h3>Sin resultados</h3><p>No hay keys con ese filtro por ahora.</p></div>';
+    const list=state.inventory.filter(k=>state.filter==='all'||k.status===state.filter);
+    $('inventory').innerHTML=list.length?list.map(k=>`<article class="key-card"><div class="key-top"><span class="key-token">⌁</span><span class="badge ${esc(k.status)}">● ${statusNames[k.status]||'KEY'}</span></div><div><h3>${esc(k.plan)}</h3><p>KEY ID · ${esc(short(k.id))}</p></div><button type="button" class="key-btn" data-claim="${esc(k.id)}" ${k.status!=='available'?'disabled':''}>${k.status==='available'?'Reclamar key →':'No disponible'}</button></article>`).join(''):'<div class="empty">No hay keys en esta categoría.</div>';
   }
   function renderOwned(){
-    $('#myKeysGrid').innerHTML=state.owned.length?state.owned.map((k)=>`
-      <article class="key-card"><div class="card-top"><span class="code-mark">${ICON}</span><span class="status-badge full">● TU KEY</span></div>
-      <h3 class="card-plan">${safe(k.plan)}</h3><div class="card-id">${safe(k.code)}</div>
-      <div class="card-bottom"><span class="card-caption">Código entregado</span><button class="card-action" data-copy-id="${safe(k.id)}">Copiar key ↗</button></div></article>`).join(''):
-      '<div class="empty"><div class="empty-symbol">◇</div><h3>Aún no tienes keys</h3><p>Reclama una key disponible y aparecerá aquí.</p></div>';
+    $('ownedKeys').innerHTML=state.owned.length?state.owned.map(k=>`<article class="key-card"><div class="key-top"><span class="key-token">✦</span><span class="badge full">● TU KEY</span></div><div><h3>${esc(k.plan)}</h3><div class="key-code">${esc(k.code)}</div></div><button class="key-btn" data-copy="${esc(k.id)}" type="button">Copiar código ↗</button></article>`).join(''):'<div class="empty">Todavía no has reclamado ninguna key.</div>';
   }
   function renderAdmin(){
-    $('#adminCount').textContent=`${state.adminKeys.length} registros`;
-    $('#adminList').innerHTML=state.adminKeys.length?state.adminKeys.map(k=>`
-      <div class="admin-row"><div class="admin-row-main"><strong>${safe(k.plan)} <span class="status-badge ${safe(k.status)}">${names[k.status]}</span></strong>
-      <small title="${safe(k.code)}">${safe(k.code)} ${k.claimed_by?' · RECLAMADA':''}</small></div>
-      <select class="admin-row-select" data-change-status="${safe(k.id)}" aria-label="Cambiar estado de ${safe(k.plan)}">
-      <option value="available" ${k.status==='available'?'selected':''}>🟢 Available</option>
-      <option value="full" ${k.status==='full'?'selected':''}>🔴 Full</option>
-      <option value="reserved" ${k.status==='reserved'?'selected':''}>🟡 Reserved</option></select>
-      <button type="button" class="admin-delete" data-delete="${safe(k.id)}">Eliminar</button></div>`).join(''):'<div class="admin-empty">No hay keys. Agrega la primera desde el botón superior.</div>';
+    $('approvals').innerHTML=state.approvals.length?state.approvals.map(a=>`<div class="approval-item"><span>${esc(a.email)}</span><button type="button" class="outline-danger" data-revoke="${esc(a.email)}">Quitar</button></div>`).join(''):'<div class="hint">No has aprobado correos todavía. Tu cuenta OWNER siempre tiene acceso.</div>';
+    $('adminTotal').textContent=state.keys.length+' KEYS';
+    $('adminKeys').innerHTML=state.keys.length?state.keys.map(k=>`<div class="admin-row"><div><strong>${esc(k.plan)} <span class="badge ${esc(k.status)}">${statusNames[k.status]}</span></strong><small>${esc(k.code)} ${k.claimed_by?'· RECLAMADA':''}</small></div><select data-status="${esc(k.id)}" aria-label="Estado de ${esc(k.plan)}"><option value="available" ${k.status==='available'?'selected':''}>Available</option><option value="reserved" ${k.status==='reserved'?'selected':''}>Reserved</option><option value="full" ${k.status==='full'?'selected':''}>Full</option></select><button class="outline-danger" type="button" data-delete="${esc(k.id)}">Eliminar</button></div>`).join(''):'<div class="empty">Sin keys. Agrega la primera arriba.</div>';
   }
-
-  function openAccount(){
-    if(state.user){
-      showModal(heading('// ACCOUNT','Tu cuenta','Sesión activa: <strong>'+safe(state.user.email)+'</strong>')+
-        `<button id="logoutBtn" type="button" class="ghost-button" style="width:100%;">${DEMO?'Restablecer la demo':'Cerrar sesión'} ↗</button>`);
-    } else showLogin();
-  }
-  function showLogin(){
-    if(DEMO){showToast('En modo demo no necesitas iniciar sesión.','success');return;}
-    showModal(heading('// ACCESS','Iniciar sesión','Escribe tu correo. Te enviaremos un enlace de acceso para reclamar y consultar tus keys.')+
-      '<form id="loginForm"><label class="form-group"><span>TU CORREO</span><input class="form-field" type="email" name="email" autocomplete="email" placeholder="tu@correo.com" maxlength="250" required /></label><button class="primary-button" type="submit">Enviar enlace de acceso ↗</button></form><p class="modal-note">Solo tú podrás ver el código de la key que reclames. Revisa tu correo y también Spam.</p>');
-  }
-  function openMine(){
-    if(!state.user){showLogin();return;}
-    scrollToSection('myKeysSection');
-  }
-  function confirmClaim(id){
+  async function claim(id){
+    if(state.role!=='admin'&&state.role!=='approved')return;
     const key=state.inventory.find(k=>k.id===id);
-    if(!key || key.status!=='available'){showToast('Esa key ya no está disponible.','error');return;}
-    if(!state.user){showLogin();return;}
-    if(state.owned.length&&!state.isAdmin){showToast('Ya reclamaste una key con esta cuenta.','error');openMine();return;}
-    showModal(heading('// CLAIM KEY','¿Reclamar esta key?','Se entregará únicamente a tu cuenta y se marcará como FULL para todos.')+
-      `<div class="confirm-card"><strong>${safe(key.plan)}</strong><br><span style="color:#a99abb;font-size:11px">ID / ${safe(shortId(key.id))}</span></div>`+
-      `<button type="button" class="primary-button" data-confirm-claim="${safe(key.id)}">Sí, reclamar mi key ↗</button><p class="modal-note">Solo se permite una key reclamada por cuenta. Esta acción no se deshace desde tu perfil.</p>`);
-  }
-  async function performClaim(id,btn){
-    btn.disabled=true;btn.textContent='Reclamando…';
-    try {
-      let obtained;
-      if(DEMO){
-        const list=demoLoad();
-        if(list.some(k=>k.claimed_by==='demo-local'))throw new Error('ALREADY_CLAIMED');
-        const key=list.find(k=>k.id===id&&k.status==='available');
-        if(!key)throw new Error('NOT_AVAILABLE');
-        key.status='full';key.claimed_by='demo-local';key.claimed_at=new Date().toISOString();demoSave(list);obtained=key;
-      }else{
-        const {data,error}=await client.rpc('chino_claim',{p_key_id:id});
-        if(error)throw error;
-        obtained=data?.[0];
-        if(!obtained)throw new Error('NOT_AVAILABLE');
-      }
-      await refresh();
-      showSecret(obtained);
-      showToast('¡Key reclamada correctamente!','success');
-    } catch(e){showToast(readableError(e),'error');btn.disabled=false;btn.textContent='Intentar nuevamente ↗';await refresh();}
-  }
-  function showSecret(k){
-    showModal(heading('// ACCESS GRANTED','¡Esta key es tuya!','Ya quedó marcada como FULL. Guarda este código en un lugar seguro.')+
-      `<div class="secret-box"><code id="secretText">${safe(k.code)}</code><button class="copy-button" id="secretCopyBtn">Copiar</button></div>`+
-      '<button type="button" class="primary-button" id="goMineBtn">Ver mis keys ↗</button>'+
-      (DEMO?'<p class="modal-note">IMPORTANTE: Este código es de demostración; no es una licencia real.</p>':''));
-  }
-  function showAddKeys(){
-    if(!state.isAdmin){showToast('Solo el administrador puede añadir keys.','error');return;}
-    showModal(heading('// OWNER CONSOLE','Agregar keys','Pega tus keys reales. Puedes agregar varias a la vez, una por línea.')+
-      '<form id="addKeysForm"><label class="form-group"><span>TIPO DE KEY</span><input class="form-field" name="plan" maxlength="80" placeholder="Ej. PERMANENT KEY, WEEKLY KEY" required /></label><label class="form-group"><span>CÓDIGOS (UNO POR LÍNEA)</span><textarea class="form-field textarea-field" name="codes" placeholder="KEY-REAL-1\nKEY-REAL-2\nKEY-REAL-3" maxlength="10000" required></textarea></label><button type="submit" class="primary-button">Agregar al inventario ↗</button></form><p class="modal-note">Ningún visitante podrá ver estas keys hasta reclamarlas. Nunca pegues aquí una clave privada del proyecto Supabase.</p>');
-  }
-  async function addKeys(form){
-    const plan=form.elements.plan.value.trim();
-    const codes=[...new Set(form.elements.codes.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean))];
-    if(!plan || !codes.length){showToast('Escribe el tipo y al menos una key.','error');return;}
-    if(codes.some(c=>c.length>300)){showToast('Una key tiene más de 300 caracteres.','error');return;}
-    if(codes.length>50){showToast('Agrega máximo 50 keys por operación.','error');return;}
-    const button=form.querySelector('button[type="submit"]');button.disabled=true;button.textContent='Agregando…';
-    try {
-      if(DEMO){const data=demoLoad();for(const code of codes){if(data.some(k=>k.code===code))throw Error('duplicate key');data.unshift({id:'demo-'+crypto.randomUUID(),plan,code,status:'available',claimed_by:null,claimed_at:null,created_at:new Date().toISOString()});}demoSave(data);}
-      else {const {error}=await client.from('chino_keys').insert(codes.map(code=>({plan,code,status:'available'})));if(error)throw error;}
-      closeModal();await refresh();showToast(`${codes.length} key(s) agregada(s) ✓`,'success');scrollToSection('adminSection');
-    }catch(e){showToast(readableError(e),'error');button.disabled=false;button.textContent='Agregar al inventario ↗';}
-  }
-  async function updateStatus(id,status){
-    if(!state.isAdmin)return;
-    const old=state.adminKeys.find(k=>k.id===id);
-    if(!old||old.status===status)return;
-    if(old.claimed_by && status!=='full'){
-      if(!window.confirm('Esta key fue reclamada. Cambiarla quitará su acceso a la key dentro de esta web (NO revoca una licencia externa). ¿Continuar?')){renderAdmin();return;}
-    }
+    if(!key||key.status!=='available')return toast('Esta key no está disponible.',true);
+    if(!confirm(`¿Reclamar ${key.plan}? Solo se permite una key por cuenta.`))return;
     try{
-      if(DEMO){const data=demoLoad();const key=data.find(k=>k.id===id);if(!key)throw Error('Key no encontrada');key.status=status;if(status!=='full'){key.claimed_by=null;key.claimed_at=null;}demoSave(data);}
-      else {const update={status};if(status!=='full'){update.claimed_by=null;update.claimed_at=null;}const {error}=await client.from('chino_keys').update(update).eq('id',id);if(error)throw error;}
-      await refresh();showToast('Estado actualizado ✓','success');
-    }catch(e){showToast(readableError(e),'error');renderAdmin();}
+      const {data,error}=await state.client.rpc('chino_claim',{p_key_id:id});
+      if(error)throw error;
+      const selected=data?.[0];if(!selected)throw Error('NOT_AVAILABLE');
+      await gate(true);
+      openDialog(`<span class="overline">CLAIM SUCCESSFUL</span><h2>¡Esta key es tuya!</h2><p>Se ha marcado FULL para los demás usuarios.</p><div class="secret">${esc(selected.code)}</div><button type="button" class="btn primary" data-dialog-copy="${esc(selected.code)}">Copiar key →</button>`);
+    }catch(e){toast(friendly(e),true);await gate(true);}
+  }
+  async function copy(s){
+    try{await navigator.clipboard.writeText(s);toast('Key copiada ✓');}
+    catch(e){toast('Copia manualmente el código que aparece en pantalla.',true);}
+  }
+  function openDialog(html){$('dialogBody').innerHTML=html;$('dialog').hidden=false;}
+  function closeDialog(){$('dialog').hidden=true;$('dialogBody').innerHTML='';}
+  async function addKeys(e){
+    e.preventDefault();if(state.role!=='admin')return;
+    const f=e.currentTarget,plan=f.elements.plan.value.trim(),raw=f.elements.codes.value;
+    const codes=[...new Set(raw.split(/\r?\n/g).map(s=>s.trim()).filter(Boolean))];
+    if(!plan||!codes.length||codes.length>50||codes.some(s=>s.length>300)){toast('Agrega entre 1 y 50 keys válidas (máximo 300 caracteres cada una).',true);return;}
+    const button=f.querySelector('button[type="submit"]');button.disabled=true;
+    try{
+      const {error}=await state.client.from('chino_keys').insert(codes.map(code=>({plan,code,status:'available'})));
+      if(error)throw error;
+      f.reset();toast(codes.length+' keys agregadas ✓');await gate(true);
+    }catch(err){toast(friendly(err),true);}finally{button.disabled=false;}
+  }
+  async function approve(e){
+    e.preventDefault();if(state.role!=='admin')return;
+    const f=e.currentTarget,email=f.elements.email.value.trim().toLowerCase();
+    if(!email||email.length>254)return;
+    const b=f.querySelector('button[type="submit"]');b.disabled=true;
+    try{
+      const {error}=await state.client.from('chino_allowed_emails').insert({email});
+      if(error)throw error;
+      f.reset();toast('Correo autorizado ✓');await gate(true);
+    }catch(err){toast(friendly(err),true);}finally{b.disabled=false;}
+  }
+  async function revoke(email){
+    if(state.role!=='admin'||!confirm('¿Quitar el acceso a '+email+'? Dejará de poder consultar y reclamar keys.'))return;
+    try{const {error}=await state.client.from('chino_allowed_emails').delete().eq('email',email);if(error)throw error;toast('Acceso retirado ✓');await gate(true);}catch(e){toast(friendly(e),true);}
+  }
+  async function changeStatus(id,status){
+    if(state.role!=='admin'||!statusNames[status])return;
+    const k=state.keys.find(x=>x.id===id);if(!k||k.status===status)return;
+    if(k.claimed_by && status!=='full' && !confirm('Esta key ya fue reclamada. Al liberarla, el usuario perderá acceso a este código en la web; la licencia externa NO se revoca. ¿Continuar?')){renderAdmin();return;}
+    try{
+      const patch={status};if(status!=='full'){patch.claimed_by=null;patch.claimed_at=null;}
+      const {error}=await state.client.from('chino_keys').update(patch).eq('id',id);if(error)throw error;
+      toast('Estado actualizado ✓');await gate(true);
+    }catch(e){toast(friendly(e),true);renderAdmin();}
   }
   async function deleteKey(id){
-    if(!state.isAdmin)return;
-    const key=state.adminKeys.find(k=>k.id===id);
-    if(!window.confirm(`¿Eliminar ${key?.plan||'esta key'} del inventario? La licencia externa NO se cancela.`))return;
-    try{
-      if(DEMO)demoSave(demoLoad().filter(k=>k.id!==id));
-      else {const {error}=await client.from('chino_keys').delete().eq('id',id);if(error)throw error;}
-      await refresh();showToast('Key eliminada del inventario.','success');
-    }catch(e){showToast(readableError(e),'error');}
+    if(state.role!=='admin'||!confirm('¿Eliminar esta key del inventario? No cancela una licencia externa.'))return;
+    try{const {error}=await state.client.from('chino_keys').delete().eq('id',id);if(error)throw error;toast('Key eliminada ✓');await gate(true);}catch(e){toast(friendly(e),true);}
   }
   async function logout(){
-    if(DEMO){demoSave(demoSeed());closeModal();await refresh();showToast('Demo restablecida ✓','success');return;}
-    const {error}=await client.auth.signOut();if(error){showToast(readableError(error),'error');return;}
-    closeModal();state.user=null;state.isAdmin=false;await refresh();showToast('Sesión cerrada.','success');
-  }
-  async function handleModalClick(e){
-    const target=e.target.closest('button');if(!target)return;
-    if(target.id==='logoutBtn'){logout();return;}
-    if(target.dataset.confirmClaim){performClaim(target.dataset.confirmClaim,target);return;}
-    if(target.id==='secretCopyBtn'){copyText($('#secretText')?.textContent||'');return;}
-    if(target.id==='goMineBtn'){closeModal();openMine();}
-  }
-  async function handleModalSubmit(e){
-    if(e.target.id==='addKeysForm'){e.preventDefault();await addKeys(e.target);return;}
-    if(e.target.id==='loginForm'){
-      e.preventDefault();const form=e.target;const email=form.elements.email.value.trim();
-      const btn=form.querySelector('button');btn.disabled=true;btn.textContent='Enviando…';
-      try{
-        const redirect=window.location.origin+window.location.pathname;
-        const {error}=await client.auth.signInWithOtp({email,options:{emailRedirectTo:redirect}});
-        if(error)throw error;
-        showModal(heading('// CHECK YOUR EMAIL','Revisa tu correo','Te enviamos un enlace para iniciar sesión. Ábrelo desde el mismo navegador para volver a esta página.')+'<p class="modal-note">Si no aparece, revisa Spam o Correo no deseado.</p>');
-        showToast('Enlace enviado a '+email,'success');
-      }catch(err){showToast(readableError(err),'error');btn.disabled=false;btn.textContent='Enviar enlace de acceso ↗';}
-    }
+    if(!state.client)return;
+    try{const {error}=await state.client.auth.signOut();if(error)throw error;state.user=null;state.role=null;state.inventory=[];state.owned=[];state.keys=[];state.approvals=[];screen('loginView');toast('Sesión cerrada.');}catch(e){toast(friendly(e),true);}
   }
   window.addEventListener('DOMContentLoaded',init);
 })();
