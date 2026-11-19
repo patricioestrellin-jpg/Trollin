@@ -1,65 +1,84 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#090911">
-  <meta name="description" content="CHINOINFIERNO · Panel privado de keys por invitación.">
-  <title>CHINOINFIERNO | Private Vault</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#090812">
+  <meta name="description" content="CHINOINFIERNO — Distribución privada de keys.">
+  <title>CHINOINFIERNO | Keys</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
-  <div class="ambient a1"></div><div class="ambient a2"></div>
-  <header class="header">
-    <div class="brand"><span class="brand-symbol">✦</span><div class="brand-type"><b>CHINOINFIERNO</b><span>PRIVATE KEY VAULT <i>V2</i></span></div></div>
-    <div class="header-right"><span class="live" id="connection"><span class="light"></span> PRIVATE SYSTEM</span><button id="logoutBtn" class="mini-btn" type="button" hidden>Cerrar sesión ↗</button></div>
+  <svg class="svg-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-logo" viewBox="0 0 48 48"><path d="M29 3c1 9-5 12-4 18 4-2 6-6 6-9 9 7 12 14 10 22-2 8-9 13-17 13C14 47 7 40 7 30c0-8 4-14 10-19-1 8 3 11 4 12C23 15 24 9 29 3Z" fill="currentColor" opacity=".9"/><path d="M25 25c1 5-2 7-2 10 2-1 3-3 3-4 5 5 5 12-2 12-5 0-8-4-7-9 1-4 4-6 5-9 0 4 2 5 3 6Z" fill="#ffffff" opacity=".95"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></symbol>
+    <symbol id="i-package" viewBox="0 0 24 24"><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="M3 7v10l9 5 9-5V7M12 12v10"/><path d="m7 4 9 5"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.5-4L3 10m0-6v6h6"/><path d="M4 13a8 8 0 0 0 14.5 4L21 14m0 6v-6h-6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-eyeoff" viewBox="0 0 24 24"><path d="M3 3 21 21M10.6 5.1A10.5 10.5 0 0 1 12 5c6 0 10 7 10 7a16.4 16.4 0 0 1-3.1 3.7M6.7 6.7C3.8 8.5 2 12 2 12s4 7 10 7a10.4 10.4 0 0 0 4.6-1.1"/><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m3 0-1 15H6L5 6M10 10v7m4-7v7"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="5"/><path d="m12 11 9-9m-5 4 3 3m-6 0 3 3"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1-2 2-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1.1 1.6V21h-2.8v-.9A1.7 1.7 0 0 0 11 18.5a1.7 1.7 0 0 0-1.8.3l-.1.1-2-2 .1-.1a1.7 1.7 0 0 0 .3-1.8A1.7 1.7 0 0 0 6 14H5v-3h1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1 2-2 .1.1A1.7 1.7 0 0 0 11 6a1.7 1.7 0 0 0 1-1.5V3h2.8v1.5A1.7 1.7 0 0 0 15.9 6a1.7 1.7 0 0 0 1.8-.3l.1-.1 2 2-.1.1a1.7 1.7 0 0 0-.3 1.8A1.7 1.7 0 0 0 21 11h1v3h-1a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+  </svg>
+  <div class="ambient ambient-one" aria-hidden="true"></div><div class="ambient ambient-two" aria-hidden="true"></div><div class="grid-noise" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="site-header-inner">
+      <div class="brand"><div class="brand-mark"><svg viewBox="0 0 48 48"><use href="#i-logo"/></svg></div><div class="brand-copy"><b>CHINOINFIERNO</b><span>KEY MANAGEMENT</span></div></div>
+      <div class="header-actions"><span class="private-chip"><svg class="icon"><use href="#i-lock"/></svg> PRIVATE ACCESS</span><button id="logoutBtn" class="icon-button logout" type="button" aria-label="Cerrar sesión" title="Cerrar sesión" hidden><svg class="icon"><use href="#i-logout"/></svg></button></div>
+    </div>
   </header>
-  <main class="shell">
-    <section id="bootView" class="center-wrap"><div class="loader"></div><p class="muted">Preparando conexión segura…</p></section>
-    <section id="setupView" class="center-wrap" hidden>
-      <div class="hero-icon">⚙</div><span class="overline">SETUP REQUIRED</span>
-      <h1>Conexión pendiente<span class="purple">.</span></h1>
-      <p class="lede">Todavía falta colocar la Publishable key en <code>config.js</code> y ejecutar el archivo <code>V2_ACTUALIZACION.sql</code>.</p>
-      <p id="setupError" class="alert">No publicamos keys de demostración. Tu inventario permanece privado.</p>
-    </section>
+
+  <main class="page">
+    <section id="bootView" class="state-center"><span class="spinner"></span><h1>Conectando</h1><p>Preparando tu espacio.</p></section>
+    <section id="setupView" class="state-center" hidden><div class="state-icon"><svg class="icon"><use href="#i-settings"/></svg></div><p class="eyebrow">CONFIGURACIÓN</p><h1>Falta conectar Supabase</h1><p id="setupError">Revisa el archivo config.js.</p></section>
+
     <section id="loginView" class="login-layout" hidden>
-      <div class="login-intro"><span class="pill"><span class="pulse"></span> BY INVITATION ONLY</span><h1>Acceso privado.<br><em>Solo los elegidos.</em></h1><p>Un espacio exclusivo para administrar y reclamar keys. Ningún visitante puede consultar el inventario sin tu autorización.</p><div class="feature-line"><span>01</span> Identidad verificada</div><div class="feature-line"><span>02</span> Acceso aprobado por el dueño</div><div class="feature-line"><span>03</span> Keys protegidas</div></div>
-      <div class="auth-card"><div class="card-upper"><div class="round-icon">⌁</div><span>SECURE GATEWAY</span></div><h2 id="authHeading">Bienvenido.</h2><p class="sub" id="authHelp">Inicia sesión para solicitar acceso al vault.</p>
-        <div class="auth-tabs"><button type="button" class="auth-tab selected" data-auth-mode="login">Entrar</button><button type="button" class="auth-tab" data-auth-mode="register">Crear cuenta</button><button type="button" class="auth-tab" data-auth-mode="magic">Por correo</button></div>
-        <form id="authForm" class="form"><label>Correo electrónico<input id="email" name="email" type="email" autocomplete="email" placeholder="tu@correo.com" maxlength="250" required></label><label id="passwordGroup">Contraseña<input id="password" name="password" type="password" autocomplete="current-password" placeholder="Mínimo 8 caracteres" minlength="8" maxlength="200" required></label><button type="submit" class="btn primary" id="authSubmit">Iniciar sesión <span>→</span></button></form>
-        <p class="hint" id="authHint">Solo cuentas autorizadas pueden ver el contenido. ¿No tienes acceso? El dueño tendrá que aprobar tu correo.</p>
-        <div id="authMessage" class="form-note" role="status" hidden></div>
+      <div class="login-art"><div class="intro-kicker"><span class="signal"></span> UNA ZONA PRIVADA</div><h1>Todo en un solo <span>lugar.</span></h1><p>Keys listas para entregar, sin vueltas. Tu acceso, tu inventario.</p><div class="login-stats"><div><svg class="icon"><use href="#i-shield"/></svg><span>Acceso autorizado</span></div><div><svg class="icon"><use href="#i-key"/></svg><span>Entrega al instante</span></div></div><div class="abstract-card" aria-hidden="true"><div class="ac-top"><div class="ac-symbol"><svg viewBox="0 0 48 48"><use href="#i-logo"/></svg></div><span>CH / KEY CARD</span></div><div class="ac-lines"><i></i><i></i><i></i></div><div class="ac-bottom"><span>PRIVATE / 001</span><span>••••  ••••  ••••</span></div></div></div>
+      <div class="login-panel glass"><div class="login-panel-top"><div class="small-icon"><svg class="icon"><use href="#i-lock"/></svg></div><span>ACCESO SEGURO</span></div><h2 id="authHeading">Bienvenido de nuevo</h2><p id="authHelp" class="muted">Inicia sesión para ver las keys disponibles.</p>
+        <div class="segment auth-segment"><button type="button" class="selected" data-auth-mode="login">Iniciar sesión</button><button type="button" data-auth-mode="register">Crear cuenta</button></div>
+        <form id="authForm" class="form"><label for="email">Correo electrónico</label><input id="email" name="email" type="email" autocomplete="email" placeholder="tu@correo.com" maxlength="250" required><label for="password">Contraseña</label><div class="password-wrapper"><input id="password" name="password" type="password" minlength="8" maxlength="200" autocomplete="current-password" placeholder="Tu contraseña" required><button type="button" id="showPassword" aria-label="Mostrar contraseña" title="Mostrar contraseña"><svg class="icon"><use href="#i-eye"/></svg></button></div><button type="submit" class="button primary full" id="authSubmit">Entrar <svg class="icon"><use href="#i-arrow"/></svg></button></form>
+        <p class="auth-foot" id="authFoot">¿Todavía no tienes acceso? El administrador debe aprobar tu correo.</p><div id="authMessage" class="inline-message" role="status" hidden></div>
       </div>
     </section>
-    <section id="pendingView" class="center-wrap" hidden>
-      <div class="hero-icon">⏳</div><span class="overline">ACCESS NOT APPROVED</span><h1>Esperando autorización<span class="purple">.</span></h1>
-      <p class="lede">Tu cuenta está identificada, pero el dueño todavía no aprobó tu correo. No puedes ver ni reclamar keys.</p>
-      <div class="pending-email" id="pendingEmail"></div><div class="row-center"><button type="button" id="checkApproval" class="btn primary">Comprobar acceso →</button><button type="button" id="pendingLogout" class="btn secondary">Salir</button></div>
-    </section>
-    <section id="errorView" class="center-wrap" hidden>
-      <div class="hero-icon">!</div><span class="overline">CONNECTION ERROR</span><h1>No se pudo cargar<span class="purple">.</span></h1>
-      <p class="lede" id="errorText">Revisa la configuración del proyecto.</p><button id="retryBtn" type="button" class="btn primary">Reintentar ↻</button>
-    </section>
+
+    <section id="pendingView" class="state-center" hidden><div class="state-icon"><svg class="icon"><use href="#i-lock"/></svg></div><p class="eyebrow">ACCESO PENDIENTE</p><h1>Falta tu autorización</h1><p>Tu cuenta está lista. Cuando el administrador apruebe tu correo podrás entrar.</p><div class="pending-email" id="pendingEmail"></div><div class="button-row"><button id="checkApproval" type="button" class="button primary">Comprobar acceso <svg class="icon"><use href="#i-arrow"/></svg></button><button id="pendingLogout" type="button" class="button ghost">Salir</button></div></section>
+    <section id="errorView" class="state-center" hidden><div class="state-icon error-icon"><svg class="icon"><use href="#i-x"/></svg></div><p class="eyebrow">SIN CONEXIÓN</p><h1>Algo no cargó bien</h1><p id="errorText">Comprueba tu conexión.</p><button id="retryBtn" type="button" class="button primary">Intentar otra vez <svg class="icon"><use href="#i-refresh"/></svg></button></section>
+
     <section id="vaultView" hidden>
-      <div class="welcome"><div><span class="pill"><span class="pulse"></span> ACCESS GRANTED</span><h1>Tu vault<span class="purple">.</span></h1><p>Bienvenido, <span id="welcomeEmail"></span>. Inventario privado y sincronizado.</p></div><div class="welcome-right"><span id="rolePill" class="role-pill">MIEMBRO</span><button id="refreshBtn" class="btn secondary small" type="button">↻ Actualizar</button></div></div>
-      <div class="stats"><article><span>KEYS TOTALES</span><strong id="totalCount">0</strong><small>Inventario</small></article><article><span>AVAILABLE</span><strong class="green" id="availableCount">0</strong><small>Listas para reclamar</small></article><article><span>FULL</span><strong class="red" id="fullCount">0</strong><small>Ya reclamadas</small></article><article><span>RESERVED</span><strong class="yellow" id="reservedCount">0</strong><small>Reservadas</small></article></div>
-      <section class="content-section"><div class="section-head"><div><span class="overline">INVENTORY / REAL-TIME</span><h2>Disponibilidad</h2></div><div class="filters" id="filters"><button data-filter="all" class="active" type="button">Todas</button><button data-filter="available" type="button">Available</button><button data-filter="full" type="button">Full</button><button data-filter="reserved" type="button">Reserved</button></div></div><div id="inventory" class="grid"></div></section>
-      <section class="content-section"><div class="section-head"><div><span class="overline">PERSONAL</span><h2>Mis keys</h2></div></div><div id="ownedKeys" class="owned-grid"></div></section>
-      <section id="adminArea" hidden>
-        <div class="admin-header"><div><span class="overline">OWNER CONTROL</span><h2>Panel de administrador</h2><p>Solo tu cuenta puede administrar el inventario y las autorizaciones.</p></div><span class="pill admin-pill">✦ OWNER</span></div>
-        <div class="admin-grid"><div class="admin-card"><div class="title-row"><h3>Agregar keys</h3><span class="overline">01</span></div><form id="addKeysForm" class="form"><label>Tipo de key<input name="plan" type="text" maxlength="80" placeholder="Ej. PERMANENT KEY" required></label><label>Keys reales (una por línea)<textarea name="codes" rows="4" maxlength="15000" placeholder="KEY-001&#10;KEY-002" required></textarea></label><button class="btn primary" type="submit">Agregar al inventario +</button></form></div>
-        <div class="admin-card"><div class="title-row"><h3>Accesos autorizados</h3><span class="overline">02</span></div><p class="card-sub">Agrega el correo exacto de cada persona. Puedes quitar permisos cuando quieras.</p><form id="approveForm" class="form inline-form"><label>Autorizar correo<input name="email" type="email" maxlength="250" placeholder="amigo@correo.com" required></label><button class="btn primary" type="submit">Autorizar +</button></form><div id="approvals" class="approval-list"></div></div></div>
-        <div class="admin-card inventory-admin"><div class="title-row"><h3>Administrar inventario</h3><span id="adminTotal" class="overline">0 KEYS</span></div><div id="adminKeys" class="admin-list"></div></div>
-        <p class="hint">Cambiar FULL o eliminar una key aquí no cancela ni revoca licencias en proveedores externos.</p>
-      </section>
+      <section class="dashboard-head"><div><span class="eyebrow accent-line">MI ESPACIO / CHINOINFIERNO</span><h1>Panel de keys<span class="period">.</span></h1><p>Controla tu stock y entrega sin complicaciones.</p><div class="session"><span id="rolePill" class="owner-badge">MIEMBRO</span><span id="welcomeEmail" class="session-mail"></span></div></div><div class="dashboard-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><use href="#i-logo"/></svg></div></section>
+
+      <div class="metrics" aria-label="Resumen del inventario"><article class="metric"><div class="metric-top"><span>Disponibles</span><svg class="icon"><use href="#i-package"/></svg></div><strong id="availableCount">0</strong><small>Listas para entregar</small></article><article class="metric"><div class="metric-top"><span>Usadas</span><svg class="icon"><use href="#i-check"/></svg></div><strong id="usedCount">0</strong><small>Ya entregadas</small></article><article class="metric"><div class="metric-top"><span>Reservadas</span><svg class="icon"><use href="#i-clock"/></svg></div><strong id="reservedCount">0</strong><small>Fuera del stock</small></article><article class="metric metric-total"><div class="metric-top"><span>Total</span><svg class="icon"><use href="#i-grid"/></svg></div><strong id="totalCount">0</strong><small>En el inventario</small></article></div>
+
+      <nav class="nav-pills" aria-label="Secciones" id="mainNav"><button type="button" data-tab="stock" class="selected"><svg class="icon"><use href="#i-grid"/></svg><span>Inventario</span></button><button type="button" data-tab="mine"><svg class="icon"><use href="#i-key"/></svg><span>Mis keys</span><span class="nav-count" id="mineCount">0</span></button><button type="button" data-tab="admin" id="adminTab" hidden><svg class="icon"><use href="#i-settings"/></svg><span>Administrar</span></button><button type="button" class="nav-refresh" id="refreshBtn" aria-label="Actualizar" title="Actualizar"><svg class="icon"><use href="#i-refresh"/></svg></button></nav>
+
+      <section id="stockPanel" class="tab-panel"><div class="section-heading"><div><span class="eyebrow">STOCK ACTUAL</span><h2>Keys disponibles</h2><p>Toca «Copiar key» para recibirla. Se marcará como usada.</p></div><span class="section-count" id="shownCount">0 keys</span></div><div class="toolbar"><label class="search-box"><svg class="icon"><use href="#i-search"/></svg><input type="search" id="stockSearch" placeholder="Buscar tipo de key" autocomplete="off" aria-label="Buscar keys"></label><div class="segment stock-filter" id="filters"><button type="button" class="selected" data-filter="all">Todas</button><button type="button" data-filter="available">Disponibles</button><button type="button" data-filter="full">Usadas</button><button type="button" data-filter="reserved">Reservadas</button></div></div><div id="inventory" class="stock-grid" aria-live="polite"></div></section>
+
+      <section id="minePanel" class="tab-panel" hidden><div class="section-heading"><div><span class="eyebrow">HISTORIAL PERSONAL</span><h2>Mis keys</h2><p>Aquí quedan las que has tomado. Puedes volver a copiarlas cuando quieras.</p></div></div><div id="ownedKeys" class="owned-list"></div></section>
+
+      <section id="adminPanel" class="tab-panel" hidden><div class="section-heading"><div><span class="eyebrow">PANEL PRIVADO</span><h2>Administrar</h2><p>Solo tú puedes agregar keys y decidir quién tiene acceso.</p></div><span class="owner-badge large">OWNER</span></div><div class="admin-layout"><article class="admin-box glass"><div class="admin-box-title"><div class="feature-symbol"><svg class="icon"><use href="#i-plus"/></svg></div><div><h3>Agregar keys</h3><p>Una por línea. Hasta 50 a la vez.</p></div></div><form id="addKeysForm" class="form"><label for="newPlan">Nombre del producto</label><input id="newPlan" name="plan" maxlength="80" placeholder="Ej. Permanent / 7 Days" required><label for="newCodes">Keys</label><textarea id="newCodes" name="codes" rows="5" maxlength="15000" placeholder="KEY-123...&#10;KEY-456..." required></textarea><button type="submit" class="button primary full">Agregar al stock <svg class="icon"><use href="#i-plus"/></svg></button></form></article>
+      <article class="admin-box glass"><div class="admin-box-title"><div class="feature-symbol"><svg class="icon"><use href="#i-users"/></svg></div><div><h3>Accesos</h3><p>Solo correos aprobados pueden ver las keys.</p></div></div><form id="approveForm" class="form"><label for="newEmail">Correo de tu compañero</label><input id="newEmail" name="email" type="email" maxlength="250" placeholder="amigo@correo.com" required><button type="submit" class="button secondary full">Autorizar correo <svg class="icon"><use href="#i-plus"/></svg></button></form><div id="approvals" class="approval-list"></div></article></div>
+      <article class="admin-box glass admin-table"><div class="admin-box-title between"><div><h3>Stock y movimientos</h3><p>Actualiza el estado o elimina una key.</p></div><span class="tiny-chip" id="adminTotal">0 KEYS</span></div><div id="adminKeys" class="admin-rows"></div><p class="help-text">Marcar una key como usada aquí no activa ni revoca licencias en el proveedor externo.</p></article></section>
     </section>
   </main>
-  <footer class="footer"><div>✦ <b>CHINOINFIERNO</b> <span>PRIVATE ACCESS · 2026</span></div><span>DESIGNED FOR MOBILE & DESKTOP</span></footer>
-  <div id="toast" class="toast" hidden role="status"></div>
-  <div id="dialog" class="dialog-backdrop" hidden><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle"><button type="button" id="closeDialog" class="close-dialog" aria-label="Cerrar">×</button><div id="dialogBody"></div></div></div>
-  <script src="config.js"></script><script src="app.js" defer></script>
+  <footer class="site-footer"><span>CHINOINFIERNO <span class="dot-separator">/</span> KEY MANAGER</span><span>PRIVATE BY DESIGN</span></footer>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <div class="dialog-layer" id="dialog" hidden><div class="dialog glass" role="dialog" aria-modal="true" aria-labelledby="dialogTitle"><button id="closeDialog" type="button" class="icon-button dialog-close" aria-label="Cerrar"><svg class="icon"><use href="#i-x"/></svg></button><div id="dialogBody"></div></div></div>
+  <script src="config.js?v=3"></script><script src="app.js?v=3" defer></script>
 </body>
 </html>

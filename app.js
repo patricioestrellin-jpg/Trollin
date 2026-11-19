@@ -2,237 +2,394 @@
   'use strict';
   const $ = (id) => document.getElementById(id);
   const cfg = window.CHINO_CONFIG || {};
-  const delay = Math.max(10, Number(cfg.refreshSeconds) || 15) * 1000;
-  const statusNames = {available:'AVAILABLE',full:'FULL',reserved:'RESERVED'};
-  const esc = (s) => String(s ?? '').replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const short = (s) => String(s||'').replace(/-/g,'').slice(0,8).toUpperCase();
-  const state = {client:null,user:null,role:null,inventory:[],owned:[],keys:[],approvals:[],filter:'all',busy:false,cycle:0,authMode:'login',toastTimer:null};
-  let currentlyShown='bootView';
+  const intervalMs = Math.max(10, Number(cfg.refreshSeconds) || 15) * 1000;
+  const names = { available: 'Disponible', full: 'Usada', reserved: 'Reservada' };
+  const icons = { available: 'i-check', full: 'i-lock', reserved: 'i-clock' };
+  const state = {
+    client: null, user: null, role: null, inventory: [], owned: [], keys: [], approvals: [],
+    filter: 'all', search: '', tab: 'stock', mode: 'login', loading: false,
+    refreshQueued: false, claimBusy: new Set(), toastTimeout: 0, lastClaim: null
+  };
+  const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+  const svg = (name) => `<svg class="icon" aria-hidden="true"><use href="#${name}"></use></svg>`;
+  const shortId = (id) => String(id || '').replace(/-/g, '').substring(0, 7).toUpperCase();
+  const n = (x) => new Intl.NumberFormat('es-MX').format(x);
+  const dt = (x) => { if (!x) return ''; const d = new Date(x); return Number.isNaN(+d) ? '' : new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(d); };
+  const badge = (status) => `<span class="status ${esc(status)}">${svg(icons[status] || 'i-key')}${esc(names[status] || status)}</span>`;
 
-  function screen(id) {
-    for (const s of ['bootView','setupView','loginView','pendingView','errorView','vaultView']) $(s).hidden=(s!==id);
-    $('logoutBtn').hidden=!(id==='vaultView' || id==='pendingView');
-    currentlyShown=id;
+  function view(which) {
+    for (const id of ['bootView', 'setupView', 'loginView', 'pendingView', 'errorView', 'vaultView']) $(id).hidden = (id !== which);
+    $('logoutBtn').hidden = !(which === 'vaultView' || which === 'pendingView');
   }
-  function toast(message,bad=false){
-    const el=$('toast');clearTimeout(state.toastTimer);el.textContent=message;el.classList.toggle('bad',bad);el.hidden=false;
-    state.toastTimer=setTimeout(()=>{el.hidden=true;},4400);
+  function toast(message, bad = false) {
+    const el = $('toast');
+    clearTimeout(state.toastTimeout);
+    el.textContent = message;
+    el.classList.toggle('bad', bad);
+    el.hidden = false;
+    state.toastTimeout = setTimeout(() => { el.hidden = true; }, 4200);
   }
-  function friendly(e){
-    const m=String(e?.message||e||'Error desconocido');
-    if (/Invalid login credentials/i.test(m)) return 'Correo o contraseña incorrectos.';
-    if (/Email not confirmed|email_not_confirmed/i.test(m)) return 'Debes confirmar tu correo primero. Revisa el mensaje de Supabase.';
-    if (/rate limit|email rate limit/i.test(m)) return 'Se alcanzó el límite de correos. Configura SMTP propio en Supabase.';
-    if (/Error sending confirmation email|Error sending magic link|email address not authorized|only send.*authorized/i.test(m)) return 'Supabase no puede enviar ese correo. Configura SMTP personalizado en Authentication → SMTP.';
-    if (/ACCESS_DENIED/i.test(m)) return 'Esta cuenta no está autorizada.';
-    if (/ALREADY_CLAIMED/i.test(m)) return 'Tu cuenta ya reclamó una key.';
-    if (/NOT_AVAILABLE/i.test(m)) return 'Esta key ya no está disponible.';
-    if (/duplicate key|unique constraint/i.test(m)) return 'Hay una key o un correo repetido.';
-    if (/does not exist|could not find the function|schema cache|permission denied/i.test(m)) return 'Falta ejecutar V2_ACTUALIZACION.sql o revisar los permisos en Supabase.';
-    return m;
+  function friendly(err) {
+    const raw = String(err?.message || err || 'Error inesperado');
+    if (/Invalid login credentials/i.test(raw)) return 'El correo o la contraseña no coinciden.';
+    if (/Email not confirmed|email_not_confirmed/i.test(raw)) return 'Confirma tu correo para iniciar sesión.';
+    if (/Password should be at least/i.test(raw)) return 'La contraseña debe tener al menos 8 caracteres.';
+    if (/User already registered/i.test(raw)) return 'Ese correo ya tiene una cuenta. Prueba iniciar sesión.';
+    if (/rate limit|email rate limit/i.test(raw)) return 'Límite de correos alcanzado. Intenta más tarde.';
+    if (/Error sending confirmation email|only send.*authorized/i.test(raw)) return 'No se pudo enviar el correo. Hay que configurar el SMTP de Supabase.';
+    if (/ACCESS_DENIED|permission denied/i.test(raw)) return 'Tu cuenta no tiene acceso a esta sección.';
+    if (/NOT_AVAILABLE/i.test(raw)) return 'Esta key ya fue tomada. Prueba con otra.';
+    if (/duplicate key|unique constraint|23505/i.test(raw)) return 'Hay un dato duplicado, o falta aplicar la migración V3 para varias keys.';
+    if (/does not exist|could not find the function|schema cache/i.test(raw)) return 'Falta instalar la migración SQL o revisar la configuración de Supabase.';
+    if (/Failed to fetch|NetworkError|fetch failed/i.test(raw)) return 'No hay conexión. Revisa tu internet e intenta otra vez.';
+    return raw;
   }
-  function fail(e){console.error('[CHINO V2]',e);$('errorText').textContent=friendly(e);screen('errorView');}
-  function setAuthMode(mode){
-    state.authMode=mode;
-    document.querySelectorAll('[data-auth-mode]').forEach(b=>b.classList.toggle('selected',b.dataset.authMode===mode));
-    $('passwordGroup').hidden=(mode==='magic');
-    $('password').required=(mode!=='magic');
-    $('password').autocomplete=mode==='register'?'new-password':'current-password';
-    $('authHeading').textContent=mode==='login'?'Bienvenido.':mode==='register'?'Crear cuenta.':'Enlace privado.';
-    $('authHelp').textContent=mode==='login'?'Accede con tu correo y contraseña.':mode==='register'?'Una cuenta no te da acceso automáticamente: el dueño debe autorizarte.':'Te enviamos un enlace para iniciar sesión en este navegador.';
-    $('authSubmit').innerHTML=mode==='login'?'Iniciar sesión <span>→</span>':mode==='register'?'Crear cuenta <span>→</span>':'Enviar enlace <span>→</span>';
-    $('authMessage').hidden=true;
+  function errorView(err) {
+    console.error('[CHINO V3]', err);
+    $('errorText').textContent = friendly(err);
+    view('errorView');
   }
-  function formMessage(message,bad=false){const e=$('authMessage');e.textContent=message;e.classList.toggle('bad',bad);e.hidden=false;}
-  function sdk(){
-    return new Promise((resolve,reject)=>{
-      if(window.supabase?.createClient) return resolve();
-      const s=document.createElement('script');
-      s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
-      s.onload=()=>window.supabase?.createClient?resolve():reject(new Error('Biblioteca Supabase no disponible'));
-      s.onerror=()=>reject(new Error('No se pudo cargar la librería Supabase. Comprueba tu conexión.'));
-      document.head.appendChild(s);
+
+  function authMode(mode) {
+    state.mode = mode;
+    document.querySelectorAll('[data-auth-mode]').forEach(b => b.classList.toggle('selected', b.dataset.authMode === mode));
+    $('authHeading').textContent = mode === 'login' ? 'Bienvenido de nuevo' : 'Crea tu cuenta';
+    $('authHelp').textContent = mode === 'login' ? 'Inicia sesión para ver las keys disponibles.' : 'Regístrate y espera la aprobación del administrador.';
+    $('authSubmit').innerHTML = mode === 'login' ? `Entrar ${svg('i-arrow')}` : `Crear cuenta ${svg('i-arrow')}`;
+    $('authFoot').textContent = mode === 'login' ? 'El inventario es privado. Solo entran los correos autorizados.' : 'Crear una cuenta no da acceso automáticamente.';
+    $('password').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+    $('authMessage').hidden = true;
+  }
+  function formNote(msg, bad = false) {
+    const box = $('authMessage'); box.hidden = false; box.classList.toggle('bad', bad); box.textContent = msg;
+  }
+  function tab(name) {
+    if (name === 'admin' && state.role !== 'admin') name = 'stock';
+    state.tab = name;
+    for (const id of ['stock', 'mine', 'admin']) {
+      $(id + 'Panel').hidden = (id !== name);
+    }
+    document.querySelectorAll('[data-tab]').forEach((button) => {
+      const selected = button.dataset.tab === name;
+      button.classList.toggle('selected', selected);
+      button.setAttribute('aria-current', selected ? 'page' : 'false');
     });
   }
-  async function init(){
-    $('authForm').addEventListener('submit',signIn);
-    document.querySelectorAll('[data-auth-mode]').forEach(b=>b.addEventListener('click',()=>setAuthMode(b.dataset.authMode)));
-    $('logoutBtn').addEventListener('click',logout);
-    $('pendingLogout').addEventListener('click',logout);
-    $('checkApproval').addEventListener('click',gate);
-    $('retryBtn').addEventListener('click',gate);
-    $('refreshBtn').addEventListener('click',()=>gate(true));
-    $('filters').addEventListener('click',(e)=>{const b=e.target.closest('[data-filter]');if(!b)return;state.filter=b.dataset.filter;document.querySelectorAll('[data-filter]').forEach(x=>x.classList.toggle('active',x===b));renderInventory();});
-    $('inventory').addEventListener('click',(e)=>{const b=e.target.closest('[data-claim]');if(b)claim(b.dataset.claim);});
-    $('ownedKeys').addEventListener('click',(e)=>{const b=e.target.closest('[data-copy]');if(b){const v=state.owned.find(k=>k.id===b.dataset.copy);if(v)copy(v.code);}});
-    $('addKeysForm').addEventListener('submit',addKeys);
-    $('approveForm').addEventListener('submit',approve);
-    $('approvals').addEventListener('click',(e)=>{const b=e.target.closest('[data-revoke]');if(b)revoke(b.dataset.revoke);});
-    $('adminKeys').addEventListener('click',(e)=>{const b=e.target.closest('[data-delete]');if(b)deleteKey(b.dataset.delete);});
-    $('adminKeys').addEventListener('change',(e)=>{const b=e.target.closest('[data-status]');if(b)changeStatus(b.dataset.status,b.value);});
-    $('closeDialog').addEventListener('click',closeDialog);
-    $('dialog').addEventListener('click',(e)=>{if(e.target===$('dialog'))closeDialog();});
-    document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closeDialog();});
-    $('dialogBody').addEventListener('click',(e)=>{const b=e.target.closest('[data-dialog-copy]');if(b)copy(b.dataset.dialogCopy);});
-
-    if(!cfg.supabaseUrl?.startsWith('https://') || !/^((sb_publishable_)|(eyJ))/.test(cfg.supabaseAnonKey||'')){
-      $('setupError').textContent='Falta una URL o una Publishable Key válida en config.js. La versión V2 nunca activa keys ficticias.';
-      screen('setupView');return;
-    }
-    try{
-      await sdk();
-      state.client=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
-      state.client.auth.onAuthStateChange((_event,session)=>{
-        if((state.user?.id||null)!==(session?.user?.id||null))setTimeout(()=>gate(),0);
-      });
-      await gate();
-      setInterval(()=>{if(!document.hidden && state.client && state.user)gate(true);},delay);
-      document.addEventListener('visibilitychange',()=>{if(!document.hidden && state.user)gate(true);});
-    }catch(e){fail(e);}
+  function empty(title, detail, icon = 'i-package') {
+    return `<div class="empty-state">${svg(icon)}<strong>${esc(title)}</strong><p>${esc(detail)}</p></div>`;
   }
-  async function signIn(e){
-    e.preventDefault();
-    const email=$('email').value.trim().toLowerCase(),password=$('password').value,mode=state.authMode;
-    const b=$('authSubmit');b.disabled=true;
-    try{
-      let error, data;
-      if(mode==='magic'){
-        ({error}=await state.client.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname,shouldCreateUser:true}}));
-        if(error)throw error;
-        formMessage('Revisa tu correo y Spam. Abre el enlace recibido para volver al vault. Si no llega, debes configurar SMTP en Supabase.');
-      }else if(mode==='register'){
-        ({data,error}=await state.client.auth.signUp({email,password,options:{emailRedirectTo:location.origin+location.pathname}}));
-        if(error)throw error;
-        formMessage(data?.session?'Cuenta creada. Esperando autorización del dueño.':'Cuenta registrada. Confirma el mensaje que recibas por correo; después deberás esperar autorización del dueño.');
-        if(data?.session)await gate();
-      }else{
-        ({error}=await state.client.auth.signInWithPassword({email,password}));
-        if(error)throw error;
+
+  function renderStock() {
+    const list = state.inventory.filter((k) =>
+      (state.filter === 'all' || k.status === state.filter) &&
+      String(k.plan).toLocaleLowerCase('es').includes(state.search)
+    );
+    $('shownCount').textContent = `${n(list.length)} ${list.length === 1 ? 'key' : 'keys'}`;
+    $('inventory').innerHTML = list.length ? list.map((k) => {
+      const canClaim = k.status === 'available';
+      return `<article class="stock-card">
+        <div class="stock-card-head"><div class="stock-card-symbol">${svg('i-key')}</div>${badge(k.status)}</div>
+        <div><h3>${esc(k.plan)}</h3><small>REF / ${esc(shortId(k.id))}</small></div>
+        <button type="button" class="stock-action" data-claim="${esc(k.id)}" ${canClaim ? '' : 'disabled'}>
+          <span>${canClaim ? 'Copiar key' : k.status === 'full' ? 'Ya usada' : 'No disponible'}</span>${svg(canClaim ? 'i-copy' : 'i-lock')}
+        </button>
+      </article>`;
+    }).join('') : empty('Sin resultados', state.search ? 'Prueba con otro nombre.' : 'Cuando haya keys aquí podrás verlas.', 'i-search');
+  }
+  function renderMine() {
+    $('mineCount').textContent = n(state.owned.length);
+    $('ownedKeys').innerHTML = state.owned.length ? state.owned.map((k) => `<article class="owned-card">
+      <div class="owned-top"><h3>${esc(k.plan)}</h3>${badge('full')}</div>
+      <p class="owned-meta">Entregada ${esc(dt(k.claimed_at) || 'recientemente')}</p>
+      <div class="code-box"><code>${esc(k.code)}</code><button type="button" data-copy-owned="${esc(k.id)}" aria-label="Copiar key" title="Copiar key">${svg('i-copy')}</button></div>
+    </article>`).join('') : empty('Todavía no has tomado ninguna', 'Las keys que copies se guardarán aquí.', 'i-key');
+  }
+  function renderAdmin() {
+    $('approvals').innerHTML = state.approvals.length ? state.approvals.map((a) => `<div class="approval-item"><span>${esc(a.email)}</span><button class="tiny-button" type="button" data-revoke="${esc(a.email)}">Quitar</button></div>`).join('') : `<p class="help-text">No hay correos autorizados todavía.</p>`;
+    $('adminTotal').textContent = `${n(state.keys.length)} KEYS`;
+    $('adminKeys').innerHTML = state.keys.length ? state.keys.map((k) => `<div class="admin-row">
+      <div><strong>${esc(k.plan)} ${badge(k.status)}</strong><small>${esc(k.code)}${k.claimed_by ? ' · entregada' : ''}${k.claimed_at ? ' · ' + esc(dt(k.claimed_at)) : ''}</small></div>
+      <select data-status="${esc(k.id)}" aria-label="Estado de ${esc(k.plan)}">
+        <option value="available" ${k.status === 'available' ? 'selected' : ''}>Disponible</option>
+        <option value="full" ${k.status === 'full' ? 'selected' : ''}>Usada</option>
+        <option value="reserved" ${k.status === 'reserved' ? 'selected' : ''}>Reservada</option>
+      </select>
+      <button type="button" class="tiny-button" data-delete="${esc(k.id)}" aria-label="Eliminar key">${svg('i-trash')}</button>
+    </div>`).join('') : empty('Tu inventario está vacío', 'Agrega tus primeras keys desde el formulario.', 'i-plus');
+  }
+  function render() {
+    $('rolePill').textContent = state.role === 'admin' ? 'OWNER' : 'AUTORIZADO';
+    $('welcomeEmail').textContent = state.user?.email || '';
+    $('adminTab').hidden = state.role !== 'admin';
+    const inv = state.inventory;
+    $('totalCount').textContent = n(inv.length);
+    $('availableCount').textContent = n(inv.filter(k => k.status === 'available').length);
+    $('usedCount').textContent = n(inv.filter(k => k.status === 'full').length);
+    $('reservedCount').textContent = n(inv.filter(k => k.status === 'reserved').length);
+    renderStock(); renderMine(); if (state.role === 'admin') renderAdmin();
+    tab(state.tab);
+  }
+
+  async function loadSDK() {
+    if (window.supabase?.createClient) return;
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
+      script.onload = () => window.supabase?.createClient ? resolve() : reject(new Error('Supabase no se cargó.'));
+      script.onerror = () => reject(new Error('No se pudo cargar Supabase. Revisa la conexión.'));
+      document.head.append(script);
+    });
+  }
+
+  // Una actualización a la vez: evita que se crucen respuestas del servidor.
+  async function gate(quiet = false) {
+    if (!state.client) return;
+    if (state.loading) { state.refreshQueued = true; return; }
+    state.loading = true;
+    if (!quiet) view('bootView');
+    try {
+      const { data: auth, error: authError } = await state.client.auth.getUser();
+      if (authError && !/Auth session missing/i.test(authError.message)) throw authError;
+      state.user = auth?.user || null;
+      if (!state.user) {
+        state.role = null; state.inventory = []; state.owned = []; state.keys = []; state.approvals = [];
+        view('loginView'); return;
+      }
+      const { data: role, error: roleError } = await state.client.rpc('chino_access_status');
+      if (roleError) throw roleError;
+      state.role = role;
+      if (!['admin', 'approved'].includes(role)) {
+        state.inventory = []; state.owned = []; state.keys = []; state.approvals = [];
+        $('pendingEmail').textContent = state.user.email || 'Cuenta pendiente';
+        view('pendingView'); return;
+      }
+      const queries = [
+        state.client.rpc('chino_inventory'),
+        state.client.from('chino_keys').select('id,plan,code,status,claimed_at,created_at').eq('claimed_by', state.user.id).order('claimed_at', { ascending: false })
+      ];
+      if (role === 'admin') {
+        queries.push(state.client.from('chino_keys').select('id,plan,code,status,claimed_by,claimed_at,created_at').order('created_at', { ascending: false }));
+        queries.push(state.client.from('chino_allowed_emails').select('email,created_at').order('created_at', { ascending: false }));
+      }
+      const results = await Promise.all(queries);
+      const problem = results.find((r) => r.error)?.error;
+      if (problem) throw problem;
+      state.inventory = results[0].data || [];
+      state.owned = results[1].data || [];
+      state.keys = role === 'admin' ? results[2].data || [] : [];
+      state.approvals = role === 'admin' ? results[3].data || [] : [];
+      render(); view('vaultView');
+      if (!quiet) window.scrollTo({ top: 0, behavior: 'instant' });
+    } catch (err) { errorView(err); }
+    finally {
+      state.loading = false;
+      if (state.refreshQueued) {
+        state.refreshQueued = false;
+        setTimeout(() => gate(true), 60);
+      }
+    }
+  }
+
+  async function login(event) {
+    event.preventDefault();
+    const email = $('email').value.trim().toLowerCase();
+    const password = $('password').value;
+    const button = $('authSubmit');
+    button.disabled = true;
+    try {
+      if (state.mode === 'register') {
+        const { data, error } = await state.client.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
+        if (error) throw error;
+        if (data?.session) {
+          formNote('Cuenta creada. Tu acceso está pendiente de aprobación.');
+          await gate();
+        } else {
+          formNote('Cuenta creada. Revisa tu correo para confirmarla; después podrás iniciar sesión.');
+        }
+      } else {
+        const { error } = await state.client.auth.signInWithPassword({ email, password });
+        if (error) throw error;
         await gate();
       }
-    }catch(ex){formMessage(friendly(ex),true);}finally{b.disabled=false;}
+    } catch (err) { formNote(friendly(err), true); }
+    finally { button.disabled = false; }
   }
-  async function gate(quiet=false){
-    if(!state.client)return;
-    if(state.busy)return;
-    const cycle=++state.cycle;state.busy=true;
-    if(!quiet)screen('bootView');
-    try{
-      // getUser valida la cuenta contra Supabase, no solo un objeto almacenado localmente.
-      const {data:auth,error:authError}=await state.client.auth.getUser();
-      if(authError && !/Auth session missing/i.test(authError.message))throw authError;
-      if(cycle!==state.cycle)return;
-      state.user=auth?.user||null;
-      if(!state.user){state.role=null;state.inventory=[];state.owned=[];state.keys=[];state.approvals=[];screen('loginView');return;}
-      const {data:role,error:roleError}=await state.client.rpc('chino_access_status');
-      if(roleError)throw roleError;
-      if(cycle!==state.cycle)return;
-      state.role=role;
-      if(role!=='admin'&&role!=='approved'){
-        state.inventory=[];state.owned=[];state.keys=[];state.approvals=[];
-        $('pendingEmail').textContent=state.user.email||'Cuenta sin correo';screen('pendingView');return;
+
+  async function copyText(code) {
+    try {
+      if (navigator.clipboard?.writeText && window.isSecureContext) {
+        await navigator.clipboard.writeText(code); return true;
       }
-      const requests=[state.client.rpc('chino_inventory'),state.client.from('chino_keys').select('id,plan,code,status,created_at').eq('claimed_by',state.user.id).order('created_at',{ascending:false})];
-      if(role==='admin'){
-        requests.push(state.client.from('chino_keys').select('id,plan,code,status,claimed_by,created_at').order('created_at',{ascending:false}));
-        requests.push(state.client.from('chino_allowed_emails').select('email,created_at').order('created_at',{ascending:false}));
-      }
-      const result=await Promise.all(requests);
-      const problem=result.find(r=>r.error)?.error;if(problem)throw problem;
-      if(cycle!==state.cycle)return;
-      state.inventory=result[0].data||[];state.owned=result[1].data||[];
-      state.keys=role==='admin'?(result[2].data||[]):[];
-      state.approvals=role==='admin'?(result[3].data||[]):[];
-      render();screen('vaultView');
-      if(!quiet)window.scrollTo({top:0,behavior:'instant'});
-    }catch(e){fail(e);}finally{state.busy=false;}
+    } catch (_) { /* Safari u otro navegador puede impedir el portapapeles. */ }
+    const t = document.createElement('textarea');
+    t.value = code;
+    t.style.position = 'fixed'; t.style.opacity = '0'; t.style.top = '0';
+    document.body.appendChild(t); t.focus(); t.select(); t.setSelectionRange(0, code.length);
+    let success = false;
+    try { success = document.execCommand('copy'); } catch (_) { success = false; }
+    t.remove();
+    return success;
   }
-  function render(){
-    $('welcomeEmail').textContent=state.user?.email||'';
-    $('rolePill').textContent=state.role==='admin'?'✦ OWNER':'● MIEMBRO';
-    $('adminArea').hidden=(state.role!=='admin');
-    const all=state.inventory;
-    $('totalCount').textContent=all.length;
-    $('availableCount').textContent=all.filter(k=>k.status==='available').length;
-    $('fullCount').textContent=all.filter(k=>k.status==='full').length;
-    $('reservedCount').textContent=all.filter(k=>k.status==='reserved').length;
-    renderInventory();renderOwned();if(state.role==='admin')renderAdmin();
+  function showClaim(key, copied) {
+    state.lastClaim = key;
+    $('dialogBody').innerHTML = `<div class="state-icon">${svg('i-check')}</div>
+      <p class="eyebrow">KEY ENTREGADA</p><h2 id="dialogTitle">Ya es tuya.</h2>
+      <p>${copied ? 'Copiada al portapapeles y marcada como usada.' : 'Se marcó como usada. Si no se copió automáticamente, usa el botón de abajo.'}</p>
+      <div class="dialog-code">${esc(key.code)}</div>
+      <button type="button" class="button primary full" id="copyDialogKey">${svg('i-copy')} Copiar código</button>
+      <button type="button" class="button ghost full" id="myKeysDialog">Ver mis keys ${svg('i-arrow')}</button>
+      <p class="dialog-note">Puedes volver a copiarla desde «Mis keys». La entrega queda registrada.</p>`;
+    $('dialog').hidden = false;
+    $('copyDialogKey').addEventListener('click', async () => {
+      if (await copyText(key.code)) toast('Key copiada');
+      else toast('No se pudo copiar. Mantén presionado el código para seleccionarlo.', true);
+    });
+    $('myKeysDialog').addEventListener('click', () => { closeDialog(); tab('mine'); });
+    $('closeDialog').focus();
   }
-  function renderInventory(){
-    const list=state.inventory.filter(k=>state.filter==='all'||k.status===state.filter);
-    $('inventory').innerHTML=list.length?list.map(k=>`<article class="key-card"><div class="key-top"><span class="key-token">⌁</span><span class="badge ${esc(k.status)}">● ${statusNames[k.status]||'KEY'}</span></div><div><h3>${esc(k.plan)}</h3><p>KEY ID · ${esc(short(k.id))}</p></div><button type="button" class="key-btn" data-claim="${esc(k.id)}" ${k.status!=='available'?'disabled':''}>${k.status==='available'?'Reclamar key →':'No disponible'}</button></article>`).join(''):'<div class="empty">No hay keys en esta categoría.</div>';
-  }
-  function renderOwned(){
-    $('ownedKeys').innerHTML=state.owned.length?state.owned.map(k=>`<article class="key-card"><div class="key-top"><span class="key-token">✦</span><span class="badge full">● TU KEY</span></div><div><h3>${esc(k.plan)}</h3><div class="key-code">${esc(k.code)}</div></div><button class="key-btn" data-copy="${esc(k.id)}" type="button">Copiar código ↗</button></article>`).join(''):'<div class="empty">Todavía no has reclamado ninguna key.</div>';
-  }
-  function renderAdmin(){
-    $('approvals').innerHTML=state.approvals.length?state.approvals.map(a=>`<div class="approval-item"><span>${esc(a.email)}</span><button type="button" class="outline-danger" data-revoke="${esc(a.email)}">Quitar</button></div>`).join(''):'<div class="hint">No has aprobado correos todavía. Tu cuenta OWNER siempre tiene acceso.</div>';
-    $('adminTotal').textContent=state.keys.length+' KEYS';
-    $('adminKeys').innerHTML=state.keys.length?state.keys.map(k=>`<div class="admin-row"><div><strong>${esc(k.plan)} <span class="badge ${esc(k.status)}">${statusNames[k.status]}</span></strong><small>${esc(k.code)} ${k.claimed_by?'· RECLAMADA':''}</small></div><select data-status="${esc(k.id)}" aria-label="Estado de ${esc(k.plan)}"><option value="available" ${k.status==='available'?'selected':''}>Available</option><option value="reserved" ${k.status==='reserved'?'selected':''}>Reserved</option><option value="full" ${k.status==='full'?'selected':''}>Full</option></select><button class="outline-danger" type="button" data-delete="${esc(k.id)}">Eliminar</button></div>`).join(''):'<div class="empty">Sin keys. Agrega la primera arriba.</div>';
-  }
-  async function claim(id){
-    if(state.role!=='admin'&&state.role!=='approved')return;
-    const key=state.inventory.find(k=>k.id===id);
-    if(!key||key.status!=='available')return toast('Esta key no está disponible.',true);
-    if(!confirm(`¿Reclamar ${key.plan}? Solo se permite una key por cuenta.`))return;
-    try{
-      const {data,error}=await state.client.rpc('chino_claim',{p_key_id:id});
-      if(error)throw error;
-      const selected=data?.[0];if(!selected)throw Error('NOT_AVAILABLE');
+  async function claim(id) {
+    if (!['admin', 'approved'].includes(state.role) || state.claimBusy.has(id)) return;
+    const key = state.inventory.find(k => k.id === id);
+    if (!key || key.status !== 'available') { toast('Esta key ya no está disponible.', true); return; }
+    state.claimBusy.add(id);
+    const button = [...$('inventory').querySelectorAll('[data-claim]')].find(b => b.dataset.claim === id);
+    if (button) { button.disabled = true; button.textContent = 'Entregando...'; }
+    try {
+      // Operación ATÓMICA: al recibir el código, el servidor ya cambió el estado.
+      // El portapapeles puede bloquearse en iOS; por eso la key también se guarda en «Mis keys».
+      const { data, error } = await state.client.rpc('chino_claim', { p_key_id: id });
+      if (error) throw error;
+      const delivered = data?.[0];
+      if (!delivered?.code) throw new Error('NOT_AVAILABLE');
+      const copied = await copyText(delivered.code);
       await gate(true);
-      openDialog(`<span class="overline">CLAIM SUCCESSFUL</span><h2>¡Esta key es tuya!</h2><p>Se ha marcado FULL para los demás usuarios.</p><div class="secret">${esc(selected.code)}</div><button type="button" class="btn primary" data-dialog-copy="${esc(selected.code)}">Copiar key →</button>`);
-    }catch(e){toast(friendly(e),true);await gate(true);}
+      showClaim(delivered, copied);
+      if (copied) toast('Key copiada · marcada como usada');
+    } catch (err) { toast(friendly(err), true); await gate(true); }
+    finally { state.claimBusy.delete(id); }
   }
-  async function copy(s){
-    try{await navigator.clipboard.writeText(s);toast('Key copiada ✓');}
-    catch(e){toast('Copia manualmente el código que aparece en pantalla.',true);}
+  function closeDialog() { $('dialog').hidden = true; $('dialogBody').replaceChildren(); state.lastClaim = null; }
+
+  async function addKeys(event) {
+    event.preventDefault(); if (state.role !== 'admin') return;
+    const form = event.currentTarget;
+    const plan = form.elements.plan.value.trim();
+    const codes = [...new Set(form.elements.codes.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean))];
+    if (!plan || !codes.length || codes.length > 50 || codes.some(s => s.length > 300)) {
+      toast('Agrega de 1 a 50 keys, una por línea.', true); return;
+    }
+    const button = form.querySelector('button[type=submit]'); button.disabled = true;
+    try {
+      const { error } = await state.client.from('chino_keys').insert(codes.map(code => ({ plan, code, status: 'available' })));
+      if (error) throw error;
+      form.reset(); toast(`${codes.length} ${codes.length === 1 ? 'key agregada' : 'keys agregadas'}`);
+      await gate(true);
+    } catch (err) { toast(friendly(err), true); }
+    finally { button.disabled = false; }
   }
-  function openDialog(html){$('dialogBody').innerHTML=html;$('dialog').hidden=false;}
-  function closeDialog(){$('dialog').hidden=true;$('dialogBody').innerHTML='';}
-  async function addKeys(e){
-    e.preventDefault();if(state.role!=='admin')return;
-    const f=e.currentTarget,plan=f.elements.plan.value.trim(),raw=f.elements.codes.value;
-    const codes=[...new Set(raw.split(/\r?\n/g).map(s=>s.trim()).filter(Boolean))];
-    if(!plan||!codes.length||codes.length>50||codes.some(s=>s.length>300)){toast('Agrega entre 1 y 50 keys válidas (máximo 300 caracteres cada una).',true);return;}
-    const button=f.querySelector('button[type="submit"]');button.disabled=true;
-    try{
-      const {error}=await state.client.from('chino_keys').insert(codes.map(code=>({plan,code,status:'available'})));
-      if(error)throw error;
-      f.reset();toast(codes.length+' keys agregadas ✓');await gate(true);
-    }catch(err){toast(friendly(err),true);}finally{button.disabled=false;}
+  async function approve(event) {
+    event.preventDefault(); if (state.role !== 'admin') return;
+    const form = event.currentTarget; const email = form.elements.email.value.trim().toLowerCase();
+    if (!email || email.length > 254) return;
+    const button = form.querySelector('button[type=submit]'); button.disabled = true;
+    try {
+      const { error } = await state.client.from('chino_allowed_emails').insert({ email });
+      if (error) throw error;
+      form.reset(); toast('Correo autorizado'); await gate(true);
+    } catch (err) { toast(friendly(err), true); }
+    finally { button.disabled = false; }
   }
-  async function approve(e){
-    e.preventDefault();if(state.role!=='admin')return;
-    const f=e.currentTarget,email=f.elements.email.value.trim().toLowerCase();
-    if(!email||email.length>254)return;
-    const b=f.querySelector('button[type="submit"]');b.disabled=true;
-    try{
-      const {error}=await state.client.from('chino_allowed_emails').insert({email});
-      if(error)throw error;
-      f.reset();toast('Correo autorizado ✓');await gate(true);
-    }catch(err){toast(friendly(err),true);}finally{b.disabled=false;}
+  async function revoke(email) {
+    if (state.role !== 'admin' || !confirm(`¿Quitar el acceso a ${email}?`)) return;
+    try {
+      const { error } = await state.client.from('chino_allowed_emails').delete().eq('email', email);
+      if (error) throw error;
+      toast('Acceso retirado'); await gate(true);
+    } catch (err) { toast(friendly(err), true); }
   }
-  async function revoke(email){
-    if(state.role!=='admin'||!confirm('¿Quitar el acceso a '+email+'? Dejará de poder consultar y reclamar keys.'))return;
-    try{const {error}=await state.client.from('chino_allowed_emails').delete().eq('email',email);if(error)throw error;toast('Acceso retirado ✓');await gate(true);}catch(e){toast(friendly(e),true);}
+  async function updateStatus(id, status) {
+    if (state.role !== 'admin' || !names[status]) return;
+    const k = state.keys.find(x => x.id === id);
+    if (!k || k.status === status) return;
+    if (k.claimed_by && status !== 'full') {
+      if (!confirm('Esta key ya se entregó. Liberarla permitirá que otra persona la tome, pero NO revoca el código externo. ¿Continuar?')) {
+        renderAdmin(); return;
+      }
+    }
+    const patch = { status };
+    if (status !== 'full') { patch.claimed_by = null; patch.claimed_at = null; }
+    try {
+      const { error } = await state.client.from('chino_keys').update(patch).eq('id', id);
+      if (error) throw error;
+      toast('Estado actualizado'); await gate(true);
+    } catch (err) { toast(friendly(err), true); renderAdmin(); }
   }
-  async function changeStatus(id,status){
-    if(state.role!=='admin'||!statusNames[status])return;
-    const k=state.keys.find(x=>x.id===id);if(!k||k.status===status)return;
-    if(k.claimed_by && status!=='full' && !confirm('Esta key ya fue reclamada. Al liberarla, el usuario perderá acceso a este código en la web; la licencia externa NO se revoca. ¿Continuar?')){renderAdmin();return;}
-    try{
-      const patch={status};if(status!=='full'){patch.claimed_by=null;patch.claimed_at=null;}
-      const {error}=await state.client.from('chino_keys').update(patch).eq('id',id);if(error)throw error;
-      toast('Estado actualizado ✓');await gate(true);
-    }catch(e){toast(friendly(e),true);renderAdmin();}
+  async function removeKey(id) {
+    if (state.role !== 'admin' || !confirm('¿Eliminar esta key del inventario? No cancela licencias externas.')) return;
+    try {
+      const { error } = await state.client.from('chino_keys').delete().eq('id', id);
+      if (error) throw error;
+      toast('Key eliminada'); await gate(true);
+    } catch (err) { toast(friendly(err), true); }
   }
-  async function deleteKey(id){
-    if(state.role!=='admin'||!confirm('¿Eliminar esta key del inventario? No cancela una licencia externa.'))return;
-    try{const {error}=await state.client.from('chino_keys').delete().eq('id',id);if(error)throw error;toast('Key eliminada ✓');await gate(true);}catch(e){toast(friendly(e),true);}
+  async function logout() {
+    try {
+      const { error } = await state.client.auth.signOut();
+      if (error) throw error;
+      state.user = null; state.role = null; state.inventory = []; state.owned = []; state.keys = []; state.approvals = [];
+      tab('stock'); view('loginView'); toast('Sesión cerrada');
+    } catch (err) { toast(friendly(err), true); }
   }
-  async function logout(){
-    if(!state.client)return;
-    try{const {error}=await state.client.auth.signOut();if(error)throw error;state.user=null;state.role=null;state.inventory=[];state.owned=[];state.keys=[];state.approvals=[];screen('loginView');toast('Sesión cerrada.');}catch(e){toast(friendly(e),true);}
+
+  async function init() {
+    $('authForm').addEventListener('submit', login);
+    document.querySelectorAll('[data-auth-mode]').forEach(b => b.addEventListener('click', () => authMode(b.dataset.authMode)));
+    $('showPassword').addEventListener('click', () => {
+      const input = $('password'); const on = input.type === 'password'; input.type = on ? 'text' : 'password';
+      $('showPassword').innerHTML = svg(on ? 'i-eyeoff' : 'i-eye');
+      $('showPassword').setAttribute('aria-label', on ? 'Ocultar contraseña' : 'Mostrar contraseña');
+    });
+    $('logoutBtn').addEventListener('click', logout); $('pendingLogout').addEventListener('click', logout);
+    $('checkApproval').addEventListener('click', () => gate()); $('retryBtn').addEventListener('click', () => gate());
+    $('refreshBtn').addEventListener('click', () => gate(true));
+    $('mainNav').addEventListener('click', (event) => { const b = event.target.closest('[data-tab]'); if (b) tab(b.dataset.tab); });
+    $('filters').addEventListener('click', (event) => {
+      const b = event.target.closest('[data-filter]'); if (!b) return;
+      state.filter = b.dataset.filter;
+      document.querySelectorAll('[data-filter]').forEach(x => x.classList.toggle('selected', x === b));
+      renderStock();
+    });
+    $('stockSearch').addEventListener('input', (event) => { state.search = event.target.value.trim().toLocaleLowerCase('es'); renderStock(); });
+    $('inventory').addEventListener('click', (event) => { const b = event.target.closest('[data-claim]'); if (b) claim(b.dataset.claim); });
+    $('ownedKeys').addEventListener('click', async (event) => {
+      const b = event.target.closest('[data-copy-owned]'); if (!b) return;
+      const k = state.owned.find(x => x.id === b.dataset.copyOwned);
+      if (k) toast(await copyText(k.code) ? 'Key copiada' : 'Cópiala seleccionando el texto.', false);
+    });
+    $('addKeysForm').addEventListener('submit', addKeys); $('approveForm').addEventListener('submit', approve);
+    $('approvals').addEventListener('click', (event) => { const b = event.target.closest('[data-revoke]'); if (b) revoke(b.dataset.revoke); });
+    $('adminKeys').addEventListener('click', (event) => { const b = event.target.closest('[data-delete]'); if (b) removeKey(b.dataset.delete); });
+    $('adminKeys').addEventListener('change', (event) => { const b = event.target.closest('[data-status]'); if (b) updateStatus(b.dataset.status, b.value); });
+    $('closeDialog').addEventListener('click', closeDialog);
+    $('dialog').addEventListener('click', (event) => { if (event.target === $('dialog')) closeDialog(); });
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('dialog').hidden) closeDialog(); });
+
+    if (!cfg.supabaseUrl?.startsWith('https://') || !/^(sb_publishable_|eyJ)/.test(cfg.supabaseAnonKey || '')) {
+      $('setupError').textContent = 'Revisa la URL y la Publishable Key pública en config.js.';
+      view('setupView'); return;
+    }
+    try {
+      await loadSDK();
+      state.client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+      state.client.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+          if ((state.user?.id || null) !== (session?.user?.id || null)) setTimeout(() => gate(true), 30);
+        }
+      });
+      await gate();
+      setInterval(() => { if (!document.hidden && state.user) gate(true); }, intervalMs);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && state.user) gate(true); });
+    } catch (err) { errorView(err); }
   }
-  window.addEventListener('DOMContentLoaded',init);
+  document.addEventListener('DOMContentLoaded', init);
 })();
